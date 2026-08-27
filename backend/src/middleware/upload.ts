@@ -47,6 +47,17 @@ const materialFilter = (_req: Request, file: Express.Multer.File, cb: FileFilter
   }
 };
 
+// Certificate filter: images + pdf
+const certFilter = (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+  const allowed = /jpeg|jpg|png|webp|pdf/;
+  const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
+  if (allowed.test(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only JPG, PNG, WEBP, PDF files allowed for certificates'));
+  }
+};
+
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
 
@@ -55,6 +66,8 @@ export const uploadThumbnail = multer({ storage: createStorage('thumbnails'), fi
 export const uploadQR = multer({ storage: createStorage('qr'), fileFilter: imageFilter, limits: { fileSize: 5 * MB } });
 export const uploadVideo = multer({ storage: createStorage('videos'), fileFilter: videoFilter, limits: { fileSize: 5 * GB } });
 export const uploadMaterial = multer({ storage: createStorage('materials'), fileFilter: materialFilter, limits: { fileSize: 50 * MB } });
+// Certificate upload — no file size limit
+export const uploadCertificate = multer({ storage: createStorage('certificates'), fileFilter: certFilter });
 
 export const uploadVideoWithThumb = multer({
   storage: multer.diskStorage({
@@ -69,6 +82,5 @@ export const uploadVideoWithThumb = multer({
       cb(null, `${unique}${path.extname(file.originalname)}`);
     },
   }),
-  // ✅ 5GB max video upload
   limits: { fileSize: 5 * GB },
 });

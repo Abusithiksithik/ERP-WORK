@@ -137,18 +137,21 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
   }
 });
 
-// DELETE /api/courses/:id
+// DELETE /api/courses/:id — cascade: payments → enrollments → students.course_id → course
 router.delete('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
-    // Check active students
-    const studentCheck = await query(
-      "SELECT COUNT(*) FROM students WHERE course_id=$1 AND status!='discontinued'", [req.params.id]
+    const cid = req.params.id;
+    // 1. Delete payments linked to enrollments of this course
+    await query(
+      `DELETE FROM payments WHERE enrollment_id IN (SELECT id FROM enrollments WHERE course_id=$1)`,
+      [cid]
     );
-    if (parseInt(studentCheck.rows[0].count) > 0) {
-      res.status(409).json({ success: false, message: 'Cannot delete course with enrolled students' });
-      return;
-    }
-    await query('DELETE FROM courses WHERE id=$1', [req.params.id]);
+    // 2. Delete enrollments for this course
+    await query('DELETE FROM enrollments WHERE course_id=$1', [cid]);
+    // 3. Nullify course_id on students (keep student records intact)
+    await query('UPDATE students SET course_id=NULL WHERE course_id=$1', [cid]);
+    // 4. Delete the course
+    await query('DELETE FROM courses WHERE id=$1', [cid]);
     res.json({ success: true, message: 'Course deleted' });
   } catch (err) {
     console.error('DELETE /courses/:id error:', err);
@@ -171,6 +174,61 @@ router.patch('/:id/status', authorize('super_admin', 'admin'), async (req: AuthR
     console.error('PATCH /courses/:id/status error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
+});
+
+
+// GET /api/courses/:id/check-access — check if current user has access to this course
+router.get('/:id/check-access', async (req: AuthRequest, res: Response) => {
+  try {
+    const courseRes = await query('SELECT id, course_name, is_free FROM courses WHERE id=$1', [req.params.id]);
+    if (courseRes.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Course not found' });
+      return;
+    }
+    const course = courseRes.rows[0];
+
+    // Free courses — always accessible
+    if (course.is_free) {
+      res.json({ success: true, hasAccess: true, reason: 'free' });
+      return;
+    }
+
+    // Admin / incharge / teacher — always have access
+    const adminRoles = ['super_admin', 'admin', 'incharge', 'teacher'];
+    if (adminRoles.includes(req.user!.role)) {
+      res.json({ success: true, hasAccess: true, reason: 'staff' });
+      return;
+    }
+
+    // Student — must be enrolled AND have a verified payment
+    const studentRes = await query('SELECT id FROM students WHERE user_id=$1', [req.user!.id]);
+    if (studentRes.rows.length === 0) {
+      res.json({ success: false, hasAccess: false, reason: 'not_a_student', message: 'Student record not found' });
+      return;
+    }
+    const studentId = studentRes.rows[0].id;
+    const enrollment = await query(
+      `SELECT e.id FROM enrollments e
+       INNER JOIN payments p ON p.enrollment_id = e.id
+       WHERE e.student_id=$1 AND e.course_id=$2 AND e.status='approved' AND p.status='verified'
+       LIMIT 1`,
+      [studentId, req.params.id]
+    );
+    if (enrollment.rows.length > 0) {
+      res.json({ success: true, hasAccess: true, reason: 'paid_enrolled' });
+    } else {
+      // Check if enrolled but not paid
+      const enrollOnly = await query(
+        'SELECT id FROM enrollments WHERE student_id=$1 AND course_id=$2 LIMIT 1',
+        [studentId, req.params.id]
+      );
+      if (enrollOnly.rows.length > 0) {
+        res.json({ success: false, hasAccess: false, reason: 'not_paid', message: 'Complete your fee payment to access this course' });
+      } else {
+        res.json({ success: false, hasAccess: false, reason: 'not_enrolled', message: 'You are not enrolled in this course' });
+      }
+    }
+  } catch (err) { console.error(err); res.status(500).json({ success: false, message: 'Server error' }); }
 });
 
 export default router;

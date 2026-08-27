@@ -9,7 +9,7 @@ router.use(authenticate);
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
     const { course_id, module_id, category_id } = req.query;
-    let q = `SELECT v.*, c.course_name, cc.category_name, m.module_name
+    let q = `SELECT v.*, c.course_name, cc.category_name, m.module_name, c.is_free
              FROM lms_videos v
              LEFT JOIN courses c ON c.id = v.course_id
              LEFT JOIN course_categories cc ON cc.id = c.category_id
@@ -21,6 +21,28 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     if (module_id) { params.push(module_id); q += ` AND v.module_id=$${params.length}`; }
     q += ' ORDER BY v.course_id ASC, m.order_number ASC NULLS LAST, v.order_number ASC, v.created_at DESC';
     const result = await query(q, params);
+
+    // For students: filter to only courses they have paid access to
+    if (req.user!.role === 'student') {
+      const studentRes = await query('SELECT id FROM students WHERE user_id=$1', [req.user!.id]);
+      if (studentRes.rows.length > 0) {
+        const studentId = studentRes.rows[0].id;
+        // Get all course_ids they have paid enrollment for
+        const accessRes = await query(
+          `SELECT DISTINCT e.course_id FROM enrollments e
+           INNER JOIN payments p ON p.enrollment_id = e.id
+           WHERE e.student_id=$1 AND e.status='approved' AND p.status='verified'`,
+          [studentId]
+        );
+        const accessibleCourseIds = new Set(accessRes.rows.map((r: any) => r.course_id));
+        const filtered = result.rows.map((v: any) => ({
+          ...v,
+          locked: !v.is_free && !accessibleCourseIds.has(v.course_id),
+        }));
+        res.json({ success: true, data: filtered });
+        return;
+      }
+    }
     res.json({ success: true, data: result.rows });
   } catch (err) { console.error('GET /videos error:', err); res.status(500).json({ success: false, message: 'Server error' }); }
 });

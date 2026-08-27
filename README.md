@@ -1,176 +1,97 @@
-# EPFT - Educational Platform & Finance Tracker
-## Nalam Academy
+# EPFT Nalam Academy ERP — Setup Guide
 
-A complete production-ready ERP + LMS web application.
-
----
-
-## 🚀 Quick Start (Docker)
-
-### Prerequisites
-- Docker & Docker Compose installed
-
-### Start the Application
-
-```bash
-# Clone the project and navigate to it
-cd epft
-
-# Start all services
-docker-compose up --build
-```
-
-### Access the Application
-
-| Service | URL |
-|---------|-----|
-| Frontend | http://localhost:3000 |
-| Backend API | http://localhost:5000/api |
-| PostgreSQL | localhost:5432 |
-
-### Default Super Admin Login
-
-| Field | Value |
-|-------|-------|
-| Email | admin@nalamacademy.com |
-| Password | Admin@123 |
+## 🔧 Critical Fix Applied
+**vite.config.ts proxy was pointing to wrong port (5000 instead of 5007)**
+This was causing `ETIMEDOUT` errors on login. Now fixed to `localhost:5007`.
 
 ---
 
-## 🛠️ Development Setup (Without Docker)
+## 🚀 First Time Setup
 
-### Prerequisites
-- Node.js 18+
-- PostgreSQL 14+
-- npm
-
-### 1. Database Setup
-
+### Step 1 — Run Migration
 ```bash
-# Create database
-psql -U postgres -c "CREATE DATABASE epft;"
-
-# Run schema
-psql -U postgres -d epft -f database/schema.sql
-
-# Run seed (creates super admin)
-psql -U postgres -d epft -f database/seed.sql
+psql -U postgres -d epft -f database/migrate.sql
 ```
+This will:
+- Update role constraint (faculty → incharge/teacher)
+- Add all new columns (parent_present, cert URLs, fee columns)
+- Create default access accounts
 
-### 2. Backend Setup
-
+### Step 2 — Start Backend
 ```bash
 cd backend
 npm install
-
-# Update .env with your local DB settings
-# Change DB_HOST to localhost
-
 npm run dev
+# Running on port 5007
 ```
 
-Backend runs at: http://localhost:5000
-
-### 3. Frontend Setup
-
+### Step 3 — Start Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
-```
-
-Frontend runs at: http://localhost:3000
-
----
-
-## 📁 Project Structure
-
-```
-epft/
-├── docker-compose.yml
-├── .env.example
-├── README.md
-├── database/
-│   ├── schema.sql        # Complete PostgreSQL schema
-│   └── seed.sql          # Super admin seed
-├── backend/
-│   ├── Dockerfile
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── src/
-│       ├── index.ts      # Entry point
-│       ├── config/       # Database config
-│       ├── middleware/   # Auth, RBAC, file uploads
-│       ├── routes/       # All API routes
-│       └── utils/        # JWT, bcrypt helpers
-├── frontend/
-│   ├── Dockerfile
-│   ├── nginx.conf
-│   ├── package.json
-│   ├── vite.config.ts
-│   └── src/
-│       ├── api/          # Axios config
-│       ├── components/   # Reusable components
-│       ├── context/      # Auth context
-│       ├── pages/        # All pages
-│       ├── types/        # TypeScript types
-│       └── utils/
+# Running on port 5123
 ```
 
 ---
 
-## 🔐 User Roles
+## 🔑 Login Credentials
 
-| Role | Access |
-|------|--------|
-| Super Admin | Full system access |
-| Admin | Manage students, courses, payments, LMS |
-| Faculty | Attendance, course materials |
-| Student | Watch videos, view materials, enroll |
-
----
-
-## 📡 API Endpoints
-
-| Module | Base Route | Methods |
-|--------|-----------|---------|
-| Auth | /api/auth | POST login, change-password, forgot-password, reset-password |
-| Users | /api/users | GET, POST, PUT, DELETE |
-| Students | /api/students | GET, POST, PUT, DELETE + /export |
-| Courses | /api/courses | GET, POST, PUT, DELETE + status toggle |
-| Batches | /api/batches | GET, POST, PUT, DELETE |
-| LMS Modules | /api/modules | GET, POST, PUT, DELETE |
-| LMS Videos | /api/videos | GET, POST, PUT, DELETE + publish + progress |
-| Materials | /api/materials | GET, POST, PUT, DELETE |
-| Payment Methods | /api/payment-methods | GET, POST, PUT, DELETE + toggle |
-| Payments | /api/payments | GET, POST + verify |
-| Enrollments | /api/enrollments | GET, POST + approve/reject + progress |
-| Attendance | /api/attendance | POST mark, GET records + reports |
-| Dashboard | /api/dashboard | GET stats, charts |
+| Role         | Email                          | Password   |
+|-------------|-------------------------------|------------|
+| Super Admin | admin@nalamacademy.com         | Admin@123  |
+| Admin       | admin2@nalamacademy.com        | Admin@123  |
+| Incharge    | incharge@nalamacademy.com      | Admin@123  |
+| Teacher     | teacher@nalamacademy.com       | Admin@123  |
 
 ---
 
-## 📋 Tech Stack
+## 👥 Role Access Summary
 
-- **Frontend**: React 18 + TypeScript + Vite
-- **Backend**: Node.js + Express + TypeScript
-- **Database**: PostgreSQL 16
-- **Auth**: JWT
-- **File Upload**: Multer
-- **Charts**: Recharts
-- **Containerization**: Docker + Docker Compose
+### Admin / Super Admin
+- Full access to everything
+- Add / Edit / Delete students, users, courses, batches
+- Manage enrollments, set fees, record payments
+- View all reports
+
+### Incharge
+- View & manage students
+- View enrollment, attendance, payments
+- Record payments
+- Cannot manage users or delete records
+
+### Teacher
+- View students and attendance
+- View videos and materials
+- Mark attendance
+- Cannot see payments or manage enrollments
 
 ---
 
-## 🔧 Environment Variables
-
-See `.env.example` for all configuration options.
-
-Key variables:
-- `DB_PASSWORD`: PostgreSQL password (default: 12345)
-- `JWT_SECRET`: JWT signing secret
-- `PORT`: Backend port (default: 5000)
+## 💰 Fee System
+1. Enroll a student in a course (Enrollment page)
+2. Click 👁 icon to set fee breakdown:
+   - Application Fee
+   - Course Fee
+   - Materials Fee
+   - **Total auto-calculated**
+3. Click 💰 icon to record a payment
+4. Balance = Total Fee − All Payments
 
 ---
 
-© 2024 Nalam Academy. All rights reserved.
+## 📋 Student Form Flow
+1. Photo upload
+2. Basic Information
+3. Course Selection (Category → Course → Batch)
+4. Parent/Guardian (checkbox: present during admission)
+5. Certificate Verification (with optional file upload)
+
+---
+
+## 🐛 Known: If login still shows ETIMEDOUT
+Make sure backend is running on port 5007:
+```bash
+# Check .env in backend/
+PORT=5007
+```

@@ -1,13 +1,43 @@
 import React, { useEffect, useState } from 'react';
-import { FiPlus, FiX, FiCheck, FiXCircle, FiEdit2 } from 'react-icons/fi';
+import { FiPlus, FiX, FiCheck, FiXCircle, FiEdit2, FiTrash2 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../../api/axios';
 import { Payment, PaymentMethod, Student } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 
+const fmt = (n: number | string) =>
+  `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 0 })}`;
+
+const FEE_TYPES = [
+  { value: 'course',      label: 'Course Fee' },
+  { value: 'hostel',      label: 'Hostel & Mess Fee' },
+  { value: 'uniform',     label: 'Uniform Fee' },
+  { value: 'internship',  label: 'Internship' },
+  { value: 'working',     label: 'Working in our Company' },
+  { value: 'other',       label: 'Other' },
+];
+
+const feeTypeColor: Record<string, string> = {
+  course:      'rgba(16,185,129,0.15)',
+  hostel:      'rgba(245,158,11,0.15)',
+  uniform:     'rgba(139,92,246,0.15)',
+  internship:  'rgba(99,102,241,0.15)',
+  working:     'rgba(20,184,166,0.15)',
+  other:       'rgba(156,163,175,0.15)',
+};
+const feeTypeText: Record<string, string> = {
+  course:      'var(--teal)',
+  hostel:      'var(--amber)',
+  uniform:     'var(--accent-2)',
+  internship:  'var(--accent)',
+  working:     '#14b8a6',
+  other:       'var(--text-secondary)',
+};
+
 const emptyForm = {
   student_id: '',
   payment_method_id: '',
+  fee_type: 'course',
   amount: '',
   payment_date: new Date().toISOString().split('T')[0],
   transaction_reference: '',
@@ -18,21 +48,25 @@ const emptyForm = {
 const PaymentList: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'super_admin' || user?.role === 'admin';
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [methods, setMethods] = useState<PaymentMethod[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [filterStatus, setFilterStatus] = useState('');
-  const [showModal, setShowModal] = useState(false);
+  const [payments, setPayments]   = useState<Payment[]>([]);
+  const [methods, setMethods]     = useState<PaymentMethod[]>([]);
+  const [students, setStudents]   = useState<Student[]>([]);
+  const [filterStatus, setFilterStatus]   = useState('');
+  const [filterFeeType, setFilterFeeType] = useState('');
+  const [showModal, setShowModal]         = useState(false);
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
   const [showVerifyModal, setShowVerifyModal] = useState(false);
-  const [verifyId, setVerifyId] = useState<number | null>(null);
+  const [verifyId, setVerifyId]     = useState<number | null>(null);
+  const [deleteId, setDeleteId]     = useState<number | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [verifyStatus, setVerifyStatus] = useState('verified');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]       = useState(false);
   const [form, setForm] = useState({ ...emptyForm });
 
   const fetchPayments = async () => {
     const params: any = {};
-    if (filterStatus) params.status = filterStatus;
+    if (filterStatus)  params.status   = filterStatus;
+    if (filterFeeType) params.fee_type = filterFeeType;
     const r = await api.get('/payments', { params });
     setPayments(r.data.data);
   };
@@ -41,7 +75,14 @@ const PaymentList: React.FC = () => {
     fetchPayments();
     api.get('/payment-methods').then(r => setMethods(r.data.data.filter((m: PaymentMethod) => m.is_enabled)));
     if (isAdmin) api.get('/students').then(r => setStudents(r.data.data));
-  }, [filterStatus]);
+  }, [filterStatus, filterFeeType]);
+
+  /* ── totals by fee type ── */
+  const feeTypeTotals = payments.reduce((acc, p) => {
+    const key = p.fee_type || 'other';
+    acc[key] = (acc[key] || 0) + Number(p.amount);
+    return acc;
+  }, {} as Record<string, number>);
 
   const openAdd = () => {
     setEditingPayment(null);
@@ -54,6 +95,7 @@ const PaymentList: React.FC = () => {
     setForm({
       student_id: String(p.student_id),
       payment_method_id: p.payment_method_id ? String(p.payment_method_id) : '',
+      fee_type: p.fee_type || 'course',
       amount: String(p.amount),
       payment_date: p.payment_date ? p.payment_date.split('T')[0] : new Date().toISOString().split('T')[0],
       transaction_reference: p.transaction_reference || '',
@@ -98,8 +140,27 @@ const PaymentList: React.FC = () => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!deleteId) return;
+    setLoading(true);
+    try {
+      await api.delete(`/payments/${deleteId}`);
+      toast.success('Payment deleted');
+      setShowDeleteModal(false);
+      fetchPayments();
+    } catch {
+      toast.error('Failed to delete payment');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const set = (f: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(p => ({ ...p, [f]: e.target.value }));
+
+  const grandTotal = payments
+    .filter(p => p.status === 'verified')
+    .reduce((s, p) => s + Number(p.amount), 0);
 
   return (
     <div>
@@ -115,13 +176,41 @@ const PaymentList: React.FC = () => {
         )}
       </div>
 
+      {/* ── Fee breakdown summary cards ── */}
+      {payments.length > 0 && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+          {FEE_TYPES.filter(ft => feeTypeTotals[ft.value]).map(ft => (
+            <div key={ft.value} style={{
+              background: feeTypeColor[ft.value],
+              borderRadius: 10, padding: '10px 16px', minWidth: 130,
+              border: `1px solid ${feeTypeText[ft.value]}33`,
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>{ft.label}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: feeTypeText[ft.value] }}>
+                {fmt(feeTypeTotals[ft.value] || 0)}
+              </div>
+            </div>
+          ))}
+          {grandTotal > 0 && (
+            <div style={{ background: 'rgba(16,185,129,0.12)', borderRadius: 10, padding: '10px 16px', minWidth: 130, border: '1px solid rgba(16,185,129,0.3)' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 2 }}>Verified Total</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--teal)' }}>{fmt(grandTotal)}</div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="card">
-        <div className="search-bar">
+        <div className="search-bar" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           <select className="form-control filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
             <option value="">All Status</option>
             <option value="pending">Pending</option>
             <option value="verified">Verified</option>
             <option value="rejected">Rejected</option>
+          </select>
+          <select className="form-control filter-select" value={filterFeeType} onChange={e => setFilterFeeType(e.target.value)}>
+            <option value="">All Fee Types</option>
+            {FEE_TYPES.map(ft => <option key={ft.value} value={ft.value}>{ft.label}</option>)}
           </select>
         </div>
 
@@ -136,6 +225,8 @@ const PaymentList: React.FC = () => {
               <thead>
                 <tr>
                   <th>Student</th>
+                  <th>Course / Batch</th>
+                  <th>Fee Type</th>
                   <th>Amount</th>
                   <th>Method</th>
                   <th>Date</th>
@@ -151,15 +242,32 @@ const PaymentList: React.FC = () => {
                       <div style={{ fontWeight: 600 }}>{p.student_name}</div>
                       <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.student_code}</div>
                     </td>
-                    <td style={{ fontWeight: 700, color: 'var(--teal)' }}>₹{Number(p.amount).toLocaleString()}</td>
-                    <td style={{ textTransform: 'capitalize' }}>{p.method_type || '—'}</td>
-                    <td>{new Date(p.payment_date).toLocaleDateString()}</td>
+                    <td>
+                      <div style={{ fontSize: 13 }}>{p.course_name || '—'}</div>
+                      {p.batch_name && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{p.batch_name}</div>}
+                    </td>
+                    <td>
+                      {p.fee_type ? (
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 8,
+                          background: feeTypeColor[p.fee_type] || 'var(--bg-tertiary)',
+                          color: feeTypeText[p.fee_type] || 'var(--text-secondary)',
+                          textTransform: 'capitalize',
+                        }}>
+                          {FEE_TYPES.find(f => f.value === p.fee_type)?.label || p.fee_type}
+                        </span>
+                      ) : <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>}
+                    </td>
+                    <td style={{ fontWeight: 700, color: 'var(--teal)', fontSize: 15 }}>
+                      {fmt(p.amount)}
+                    </td>
+                    <td style={{ textTransform: 'capitalize', fontSize: 13 }}>{p.method_type || '—'}</td>
+                    <td style={{ fontSize: 13 }}>{new Date(p.payment_date).toLocaleDateString()}</td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.transaction_reference || '—'}</td>
                     <td><span className={`badge badge-${p.status}`}>{p.status}</span></td>
                     {isAdmin && (
                       <td>
                         <div className="table-actions">
-                          {/* Edit button — always available for admin */}
                           <button
                             className="action-btn edit"
                             title="Edit Payment"
@@ -167,7 +275,13 @@ const PaymentList: React.FC = () => {
                           >
                             <FiEdit2 />
                           </button>
-                          {/* Verify / Reject — only for pending */}
+                          <button
+                            className="action-btn delete"
+                            title="Delete Payment"
+                            onClick={() => { setDeleteId(p.id); setShowDeleteModal(true); }}
+                          >
+                            <FiTrash2 />
+                          </button>
                           {p.status === 'pending' && (
                             <>
                               <button
@@ -215,6 +329,38 @@ const PaymentList: React.FC = () => {
                   </select>
                 </div>
               )}
+
+              {/* Fee type selector */}
+              <div className="form-group">
+                <label className="form-label">Fee Type *</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 4 }}>
+                  {FEE_TYPES.map(ft => (
+                    <label
+                      key={ft.value}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                        border: `2px solid ${form.fee_type === ft.value ? feeTypeText[ft.value] : 'var(--border-light)'}`,
+                        background: form.fee_type === ft.value ? feeTypeColor[ft.value] : 'var(--bg-tertiary)',
+                        transition: 'all 0.15s', userSelect: 'none',
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="fee_type"
+                        value={ft.value}
+                        checked={form.fee_type === ft.value}
+                        onChange={() => setForm(p => ({ ...p, fee_type: ft.value }))}
+                        style={{ display: 'none' }}
+                      />
+                      <span style={{ fontSize: 12, fontWeight: 600, color: form.fee_type === ft.value ? feeTypeText[ft.value] : 'var(--text-secondary)' }}>
+                        {ft.label}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Amount (₹) *</label>
@@ -261,6 +407,27 @@ const PaymentList: React.FC = () => {
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Cancel</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Payment Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 380 }}>
+            <div className="modal-header">
+              <h2 className="modal-title" style={{ color: 'var(--red)' }}>🗑️ Delete Payment</h2>
+              <button className="modal-close" onClick={() => setShowDeleteModal(false)}><FiX /></button>
+            </div>
+            <p style={{ marginBottom: 20, color: 'var(--text-secondary)' }}>
+              Are you sure you want to permanently delete this payment record? This cannot be undone.
+            </p>
+            <div className="form-actions">
+              <button className="btn btn-danger" onClick={handleDelete} disabled={loading}>
+                {loading ? 'Deleting...' : '🗑️ Yes, Delete'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setShowDeleteModal(false)}>Cancel</button>
+            </div>
           </div>
         </div>
       )}

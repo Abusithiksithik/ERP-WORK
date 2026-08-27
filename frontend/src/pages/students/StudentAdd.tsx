@@ -1,100 +1,257 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { FiUpload } from 'react-icons/fi';
+import { FiUpload, FiFileText, FiUser, FiChevronDown, FiImage, FiAlertCircle } from 'react-icons/fi';
 import api from '../../api/axios';
+import { Course, Batch } from '../../types';
+
+interface CertFile { file: File | null; preview: string | null; }
+
+const MASTER_COURSE_NAMES = ['IMR', 'TN', 'FREE'];
 
 const StudentAdd: React.FC = () => {
   const navigate = useNavigate();
-  const photoRef = useRef<HTMLInputElement>(null);
+  const photoRef      = useRef<HTMLInputElement>(null);
+  const cert10Ref     = useRef<HTMLInputElement>(null);
+  const cert12Ref     = useRef<HTMLInputElement>(null);
+  const certDipRef    = useRef<HTMLInputElement>(null);
+  const consentImgRef = useRef<HTMLInputElement>(null);
+
   const [loading, setLoading] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState('');
+  const [certFiles, setCertFiles] = useState<Record<string, CertFile>>({
+    '10th':    { file: null, preview: null },
+    '12th':    { file: null, preview: null },
+    'diploma': { file: null, preview: null },
+  });
+  const [consentImagePreview, setConsentImagePreview] = useState<string | null>(null);
+  const [consentImageFile, setConsentImageFile]       = useState<File | null>(null);
+
   const [form, setForm] = useState({
-    full_name: '',
-    mobile: '',
-    email: '',
-    date_of_birth: '',
-    gender: '',
-    address: '',
-    parent_name: '',
-    parent_mobile: '',
+    full_name: '', mobile: '', email: '',
+    date_of_birth: '', gender: '', address: '',
+    parent_present: false, guardian_type: '', parent_name: '', parent_mobile: '',
     status: 'active',
-    cert_10th_collected: false,
-    cert_12th_collected: false,
-    cert_diploma_collected: false,
+    cert_10th_collected: false, cert_12th_collected: false, cert_diploma_collected: false,
+    consent_given: false,
   });
 
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Course + Batch
+  const [allCourses, setAllCourses] = useState<Course[]>([]);
+  const [allBatches, setAllBatches] = useState<Batch[]>([]);
+  const [selectedCourse, setSelectedCourse] = useState('');
+  const [selectedBatch, setSelectedBatch]   = useState('');
+
+  // Payment
+  const [initialPayment, setInitialPayment]   = useState('');
+  const [paymentMethod, setPaymentMethod]     = useState('cash');
+  const [payLater, setPayLater]               = useState(false);
+
+  // Internship plan
+  const [showInternship, setShowInternship]     = useState(false);
+  const [internshipMonthly, setInternshipMonthly] = useState('');
+  const [internshipMonths, setInternshipMonths]   = useState('');
+
+  useEffect(() => {
+    api.get('/courses').then(r => {
+      const courses: Course[] = r.data.data || [];
+      // Only show master courses: IMR, TN, FREE
+      const masterCourses = courses.filter(c =>
+        MASTER_COURSE_NAMES.includes(c.course_name.toUpperCase()) && c.status === 'active'
+      );
+      setAllCourses(masterCourses.length > 0 ? masterCourses : courses.filter(c => c.status === 'active'));
+    }).catch(() => {});
+    api.get('/batches').then(r => setAllBatches(r.data.data || [])).catch(() => {});
+  }, []);
+
+  // Computed values
+  const selectedCourseObj = allCourses.find(c => String(c.id) === selectedCourse);
+  const courseFee = selectedCourseObj ? Number(selectedCourseObj.fee_amount || 0) : 0;
+  const isFree    = selectedCourseObj?.is_free || courseFee === 0;
+  const initPayAmt = Math.max(0, Number(initialPayment) || 0);
+  const totalPaid  = initPayAmt;
+  const balance    = Math.max(0, courseFee - totalPaid);
+
+  const internshipPlannedTotal = (Number(internshipMonthly) || 0) * (Number(internshipMonths) || 0);
+
+  const handleCertFileChange = (certType: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) setPhotoPreview(URL.createObjectURL(file));
+    if (!file) return;
+    const isImage = /\.(jpg|jpeg|png|webp)$/i.test(file.name);
+    setCertFiles(prev => ({ ...prev, [certType]: { file, preview: isImage ? URL.createObjectURL(file) : null } }));
+  };
+
+  const handleConsentImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setConsentImageFile(file);
+    setConsentImagePreview(URL.createObjectURL(file));
+  };
+
+  const handleCourseChange = (courseId: string) => {
+    setSelectedCourse(courseId);
+    setSelectedBatch('');
+    setInitialPayment('');
+    setPayLater(false);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setEmailError('');
+    if (!form.full_name.trim()) { toast.error('Full name is required'); return; }
+    if (!form.mobile.trim())    { toast.error('Mobile number is required'); return; }
+    if (!form.email.trim())     { toast.error('Email is required'); return; }
+    if (!selectedBatch)         { toast.error('Batch Year is required — please select a batch'); return; }
+    if (!selectedCourse)        { toast.error('Course is required — please select a course'); return; }
+    if (initPayAmt > 0 && initPayAmt > courseFee) {
+      toast.error('Initial payment cannot exceed the course fee');
+      return;
+    }
+
     setLoading(true);
     try {
       const fd = new FormData();
-      Object.entries(form).forEach(([k, v]) => {
-        if (typeof v === 'boolean') fd.append(k, String(v));
-        else if (v) fd.append(k, v);
-      });
+      fd.append('full_name', form.full_name.trim());
+      fd.append('mobile', form.mobile.trim());
+      fd.append('email', form.email.trim().toLowerCase());
+      if (form.date_of_birth) fd.append('date_of_birth', form.date_of_birth);
+      if (form.gender)        fd.append('gender', form.gender);
+      if (form.address)       fd.append('address', form.address);
+      fd.append('status', form.status);
+      fd.append('cert_10th_collected',    String(form.cert_10th_collected));
+      fd.append('cert_12th_collected',    String(form.cert_12th_collected));
+      fd.append('cert_diploma_collected', String(form.cert_diploma_collected));
+      fd.append('consent_given', String(form.consent_given));
+      if (form.guardian_type) {
+        fd.append('guardian_type', form.guardian_type);
+        fd.append('parent_present', 'true');
+        if (form.parent_name)   fd.append('parent_name',   form.parent_name);
+        if (form.parent_mobile) fd.append('parent_mobile', form.parent_mobile);
+      }
+      fd.append('course_id', selectedCourse);
+      fd.append('batch_id',  selectedBatch);
+
+      // Initial payment
+      if (!payLater && initPayAmt > 0) {
+        fd.append('initial_payment', String(initPayAmt));
+        fd.append('payment_method', paymentMethod);
+        fd.append('payment_type_label', 'Initial payment at admission');
+      }
+
+      // Internship plan (stored as notes — NOT actual payment)
+      if (showInternship && internshipMonthly && internshipMonths) {
+        fd.append('internship_monthly', internshipMonthly);
+        fd.append('internship_months',  internshipMonths);
+      }
+
       if (photoRef.current?.files?.[0]) fd.append('photo', photoRef.current.files[0]);
-      await api.post('/students', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      if (consentImageFile)             fd.append('consent_image', consentImageFile);
+
+      const res = await api.post('/students', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const studentId = res.data.data.id;
+
+      // Upload certs
+      const certMap: Record<string, string> = {
+        cert_10th_collected: '10th', cert_12th_collected: '12th', cert_diploma_collected: 'diploma',
+      };
+      for (const [key, certType] of Object.entries(certMap)) {
+        const collected = form[key as keyof typeof form];
+        const certFile  = certFiles[certType].file;
+        if (collected && certFile) {
+          const cfd = new FormData();
+          cfd.append('file', certFile);
+          cfd.append('cert_type', certType);
+          await api.post(`/students/${studentId}/cert`, cfd, { headers: { 'Content-Type': 'multipart/form-data' } });
+        }
+      }
+
       toast.success('Student added successfully!');
-      navigate('/students');
+      navigate(`/students/${studentId}`);
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to add student');
-    } finally {
-      setLoading(false);
-    }
+      const errData = err.response?.data;
+      if (errData?.error === 'DUPLICATE_EMAIL') {
+        setEmailError(errData.message || 'This email already exists. Please use a different email.');
+        toast.error('Duplicate email — please use a different email address');
+      } else {
+        toast.error(errData?.message || 'Failed to add student');
+      }
+    } finally { setLoading(false); }
   };
 
-  const set = (field: string) => (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>
-  ) => setForm(f => ({ ...f, [field]: e.target.value }));
+  const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+    setForm(f => ({ ...f, [field]: e.target.value }));
+
+  const certRefs = { '10th': cert10Ref, '12th': cert12Ref, 'diploma': certDipRef };
+  const certLabels: Record<string, { key: keyof typeof form; label: string }> = {
+    '10th':    { key: 'cert_10th_collected',    label: '10th Marksheet' },
+    '12th':    { key: 'cert_12th_collected',    label: '12th / HSC Marksheet' },
+    'diploma': { key: 'cert_diploma_collected', label: 'TC / Diploma Certificate' },
+  };
+
+  // Batches filtered by selected course
+  const filteredBatches = selectedCourse
+    ? allBatches.filter(b => String(b.course_id) === selectedCourse)
+    : allBatches;
 
   return (
     <div>
       <div className="page-header">
-        <div>
-          <h1 className="page-title">Add Student</h1>
-          <p className="page-subtitle">Create a new student account</p>
-        </div>
+        <div><h1 className="page-title">Add Student</h1><p className="page-subtitle">Fill all details carefully</p></div>
+        <button className="btn btn-secondary" onClick={() => navigate('/students')}>Cancel</button>
       </div>
 
-      <div className="card">
-        <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit}>
 
-          {/* ── Photo ── */}
+        {/* SECTION 1: Photo */}
+        <div className="card" style={{ marginBottom: 16 }}>
           <h3 className="section-heading">📸 Student Photo</h3>
-          <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 20 }}>
-            {photoPreview
-              ? <img src={photoPreview} alt="preview" style={{ width: 80, height: 80, borderRadius: '50%', objectFit: 'cover', border: '3px solid var(--accent)' }} />
-              : <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'var(--bg-tertiary)', border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 28 }}>👤</div>}
-            <label className="btn btn-secondary" style={{ cursor: 'pointer' }} onClick={() => photoRef.current?.click()}>
-              <FiUpload /> Upload Photo
-              <input type="file" ref={photoRef} accept="image/*" onChange={handlePhotoChange} style={{ display: 'none' }} />
-            </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+            <div>
+              {photoPreview
+                ? <img src={photoPreview} alt="preview" style={{ width: 90, height: 90, borderRadius: '50%', objectFit: 'cover', border: '3px solid var(--accent)' }} />
+                : <div style={{ width: 90, height: 90, borderRadius: '50%', background: 'var(--bg-tertiary)', border: '2px dashed var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 32 }}><FiUser /></div>}
+            </div>
+            <div>
+              <button type="button" className="btn btn-secondary" onClick={() => photoRef.current?.click()}>
+                <FiUpload size={14} /> Upload Photo
+              </button>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>JPG, PNG, WEBP — max 5MB</p>
+              <input type="file" ref={photoRef} accept="image/*" onChange={e => { const f = e.target.files?.[0]; if (f) setPhotoPreview(URL.createObjectURL(f)); }} style={{ display: 'none' }} />
+            </div>
           </div>
+        </div>
 
-          {/* ── Personal Info ── */}
-          <h3 className="section-heading">👤 Personal Information</h3>
+        {/* SECTION 2: Basic Information */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-heading">👤 Basic Information</h3>
           <div className="form-grid">
             <div className="form-group">
-              <label className="form-label">Full Name *</label>
-              <input className="form-control" value={form.full_name} onChange={set('full_name')} placeholder="Enter full name" required />
+              <label className="form-label">Full Name <span style={{ color: 'var(--red)' }}>*</span></label>
+              <input className="form-control" value={form.full_name} onChange={set('full_name')} placeholder="Student full name" required />
             </div>
             <div className="form-group">
-              <label className="form-label">Mobile Number *</label>
-              <input className="form-control" value={form.mobile} onChange={set('mobile')} placeholder="10-digit mobile" required />
+              <label className="form-label">Mobile Number <span style={{ color: 'var(--red)' }}>*</span></label>
+              <input className="form-control" value={form.mobile} onChange={set('mobile')} placeholder="10-digit mobile" maxLength={10} required />
             </div>
             <div className="form-group">
-              <label className="form-label">Email Address *</label>
-              <input type="email" className="form-control" value={form.email} onChange={set('email')} placeholder="student@example.com" required />
+              <label className="form-label">Email Address <span style={{ color: 'var(--red)' }}>*</span></label>
+              <input
+                type="email" className="form-control"
+                value={form.email}
+                onChange={e => { set('email')(e); setEmailError(''); }}
+                placeholder="student@email.com" required
+                style={emailError ? { borderColor: 'var(--red)' } : {}}
+              />
+              {emailError && (
+                <div className="field-error">
+                  <FiAlertCircle size={12} style={{ marginRight: 4 }} />{emailError}
+                </div>
+              )}
             </div>
             <div className="form-group">
               <label className="form-label">Date of Birth</label>
-              <input type="date" className="form-control" value={form.date_of_birth} onChange={set('date_of_birth')} />
+              <input type="date" className="form-control" value={form.date_of_birth} onChange={set('date_of_birth')} max={new Date().toISOString().split('T')[0]} />
             </div>
             <div className="form-group">
               <label className="form-label">Gender</label>
@@ -110,60 +267,297 @@ const StudentAdd: React.FC = () => {
               <select className="form-control" value={form.status} onChange={set('status')}>
                 <option value="active">Active</option>
                 <option value="inactive">Inactive</option>
-                <option value="suspended">Suspended</option>
               </select>
             </div>
           </div>
           <div className="form-group">
             <label className="form-label">Address</label>
-            <textarea className="form-control" value={form.address} onChange={set('address')} rows={2} placeholder="Full address..." />
+            <textarea className="form-control" value={form.address} onChange={set('address')} rows={2} placeholder="Full residential address" />
           </div>
+        </div>
 
-          {/* ── Parent Info ── */}
-          <h3 className="section-heading">👨‍👩‍👧 Parent / Guardian Information</h3>
+        {/* SECTION 3: Course & Batch & Payment */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-heading">📚 Course, Batch & Payment</h3>
           <div className="form-grid">
             <div className="form-group">
-              <label className="form-label">Parent Name</label>
-              <input className="form-control" value={form.parent_name} onChange={set('parent_name')} placeholder="Parent / guardian name" />
+              <label className="form-label">Course <span style={{ color: 'var(--red)' }}>*</span></label>
+              <div style={{ position: 'relative' }}>
+                <select
+                  className="form-control" value={selectedCourse}
+                  onChange={e => handleCourseChange(e.target.value)}
+                  required style={{ paddingRight: 32, appearance: 'none' }}
+                >
+                  <option value="">— Select Course *—</option>
+                  {allCourses.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.course_name}
+                      {c.is_free ? ' — FREE' : ` — ₹${Number(c.fee_amount).toLocaleString('en-IN')}`}
+                    </option>
+                  ))}
+                </select>
+                <FiChevronDown style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)' }} />
+              </div>
             </div>
+
             <div className="form-group">
-              <label className="form-label">Parent Mobile</label>
-              <input className="form-control" value={form.parent_mobile} onChange={set('parent_mobile')} placeholder="Parent mobile number" />
+              <label className="form-label">Batch Year <span style={{ color: 'var(--red)' }}>*</span></label>
+              <div style={{ position: 'relative' }}>
+                <select
+                  className="form-control" value={selectedBatch}
+                  onChange={e => setSelectedBatch(e.target.value)}
+                  required
+                  style={{ paddingRight: 32, appearance: 'none', borderColor: !selectedBatch ? 'var(--amber)' : undefined }}
+                >
+                  <option value="">— Select Batch Year * —</option>
+                  {(selectedCourse ? filteredBatches : allBatches).map(b => (
+                    <option key={b.id} value={b.id}>{b.batch_name}{b.course_name ? ` · ${b.course_name}` : ''}</option>
+                  ))}
+                </select>
+                <FiChevronDown style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)' }} />
+              </div>
+              {!selectedBatch && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4, fontWeight: 600 }}>⚠ Batch year is mandatory</p>}
             </div>
           </div>
 
-          {/* ── Certificate Verification ── */}
-          <h3 className="section-heading">📋 Certificate Verification</h3>
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 14, marginTop: -8 }}>Mark the original certificates collected from the student.</p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 24 }}>
-            {([
-              { key: 'cert_10th_collected',    label: '10th Marksheet' },
-              { key: 'cert_12th_collected',    label: '12th Marksheet' },
-              { key: 'cert_diploma_collected', label: 'TC' },
-            ] as const).map(({ key, label }) => (
-              <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', userSelect: 'none' }}>
-                <input
-                  type="checkbox"
-                  checked={form[key]}
-                  onChange={e => setForm(f => ({ ...f, [key]: e.target.checked }))}
-                  style={{ width: 18, height: 18, accentColor: 'var(--accent)', cursor: 'pointer' }}
-                />
-                <span style={{ fontSize: 14, fontWeight: 500 }}>{label} Collected</span>
-                {form[key] && <span style={{ fontSize: 12, color: 'var(--teal)', fontWeight: 600 }}>✓ Collected</span>}
+          {/* Fee Preview */}
+          {selectedCourse && (
+            <div className="fee-preview-box">
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: 'var(--text-secondary)' }}>
+                💰 Fee Summary
+              </div>
+              <div className="fee-preview-row">
+                <span>Course Fee</span>
+                <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {isFree ? '₹0 (Free Course)' : `₹${courseFee.toLocaleString('en-IN')}`}
+                </span>
+              </div>
+              <div className="fee-preview-row">
+                <span>Initial Payment</span>
+                <span style={{ color: 'var(--teal)' }}>₹{totalPaid.toLocaleString('en-IN')}</span>
+              </div>
+              <div className="fee-preview-row">
+                <span style={{ fontWeight: 700 }}>Balance</span>
+                <span style={{ color: balance > 0 ? 'var(--red)' : 'var(--teal)', fontWeight: 700 }}>
+                  ₹{balance.toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Payment Section */}
+          {selectedCourse && !isFree && (
+            <div style={{ marginTop: 16 }}>
+              {/* Pay Later toggle */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none',
+                  padding: '10px 16px', borderRadius: 10,
+                  border: `2px solid ${payLater ? 'var(--amber)' : 'var(--border-light)'}`,
+                  background: payLater ? 'rgba(245,158,11,0.08)' : 'var(--bg-tertiary)',
+                  flex: 1,
+                }}>
+                  <input type="checkbox" checked={payLater} onChange={e => { setPayLater(e.target.checked); if (e.target.checked) setInitialPayment(''); }}
+                    style={{ width: 18, height: 18, accentColor: 'var(--amber)', cursor: 'pointer' }} />
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: payLater ? 'var(--amber)' : 'var(--text-primary)' }}>
+                      ⏳ Pay Later
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Student will pay fees later</div>
+                  </div>
+                </label>
+              </div>
+
+              {!payLater && (
+                <>
+                  <div className="form-grid">
+                    <div className="form-group">
+                      <label className="form-label">💰 Initial Payment ₹ <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(Optional)</span></label>
+                      <input
+                        type="number" className="form-control"
+                        value={initialPayment}
+                        onChange={e => setInitialPayment(e.target.value)}
+                        placeholder={`e.g. 5000 (max ₹${courseFee.toLocaleString('en-IN')})`}
+                        min={0} max={courseFee}
+                      />
+                    </div>
+                    {initPayAmt > 0 && (
+                      <div className="form-group">
+                        <label className="form-label">Payment Method <span style={{ color: 'var(--red)' }}>*</span></label>
+                        <select className="form-control" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                          <option value="cash">Cash</option>
+                          <option value="upi">GPay / UPI</option>
+                          <option value="bank">Bank Transfer</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              {/* Internship Plan */}
+              <div style={{ marginTop: 8 }}>
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none',
+                  padding: '10px 16px', borderRadius: 10,
+                  border: `2px solid ${showInternship ? 'var(--accent)' : 'var(--border-light)'}`,
+                  background: showInternship ? 'rgba(99,102,241,0.06)' : 'var(--bg-tertiary)',
+                }}>
+                  <input type="checkbox" checked={showInternship} onChange={e => setShowInternship(e.target.checked)}
+                    style={{ width: 18, height: 18, accentColor: 'var(--accent)', cursor: 'pointer' }} />
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: showInternship ? 'var(--accent)' : 'var(--text-primary)' }}>
+                      🎓 Internship Payment Plan
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Monthly installments — plan only, does NOT count as actual payment
+                    </div>
+                  </div>
+                </label>
+
+                {showInternship && (
+                  <div className="form-grid" style={{ marginTop: 12 }}>
+                    <div className="form-group">
+                      <label className="form-label">Monthly Amount ₹</label>
+                      <input type="number" className="form-control" value={internshipMonthly}
+                        onChange={e => setInternshipMonthly(e.target.value)} placeholder="e.g. 5000" min={0} />
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Number of Months</label>
+                      <input type="number" className="form-control" value={internshipMonths}
+                        onChange={e => setInternshipMonths(e.target.value)} placeholder="e.g. 4" min={1} max={24} />
+                    </div>
+                    {internshipPlannedTotal > 0 && (
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', fontSize: 13 }}>
+                          📋 <strong>Planned Total:</strong> ₹{internshipMonthly} × {internshipMonths} months = <strong style={{ color: 'var(--accent)' }}>₹{internshipPlannedTotal.toLocaleString('en-IN')}</strong>
+                          <span style={{ color: 'var(--amber)', marginLeft: 8, fontWeight: 600 }}>⚠ Plan only — not counted as actual payment</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* SECTION 4: Parent / Guardian */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-heading">👨‍👩‍👧 Parent / Guardian</h3>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+            {[
+              { value: '',         label: 'Not Present', icon: '—'  },
+              { value: 'parent',   label: 'Parent',      icon: '👨‍👩‍👧' },
+              { value: 'guardian', label: 'Guardian',    icon: '🧑‍🤝‍🧑' },
+            ].map(opt => (
+              <label key={opt.value} style={{
+                flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                gap: 6, padding: '12px 8px', borderRadius: 10, cursor: 'pointer',
+                border: `2px solid ${form.guardian_type === opt.value ? 'var(--accent)' : 'var(--border-light)'}`,
+                background: form.guardian_type === opt.value ? 'rgba(99,102,241,0.08)' : 'var(--bg-tertiary)',
+                transition: 'all 0.15s', userSelect: 'none',
+              }}>
+                <input type="radio" name="guardian_type" value={opt.value}
+                  checked={form.guardian_type === opt.value}
+                  onChange={() => setForm(f => ({ ...f, guardian_type: opt.value, parent_present: opt.value !== '', parent_name: '', parent_mobile: '' }))}
+                  style={{ display: 'none' }} />
+                <span style={{ fontSize: 22 }}>{opt.icon}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: form.guardian_type === opt.value ? 'var(--accent)' : 'var(--text-secondary)' }}>{opt.label}</span>
               </label>
             ))}
           </div>
+          {form.guardian_type && (
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">{form.guardian_type === 'parent' ? 'Parent Name' : 'Guardian Name'}</label>
+                <input className="form-control" value={form.parent_name} onChange={set('parent_name')} placeholder={form.guardian_type === 'parent' ? 'Father / Mother name' : 'Guardian full name'} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">{form.guardian_type === 'parent' ? 'Parent Mobile' : 'Guardian Mobile'}</label>
+                <input className="form-control" value={form.parent_mobile} onChange={set('parent_mobile')} maxLength={10} />
+              </div>
+            </div>
+          )}
+        </div>
 
-          <div className="form-actions">
-            <button type="submit" className="btn btn-primary" disabled={loading}>
-              {loading ? 'Adding Student...' : 'Add Student'}
-            </button>
-            <button type="button" className="btn btn-secondary" onClick={() => navigate('/students')}>
-              Cancel
-            </button>
+        {/* SECTION 5: Certificate Verification */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-heading">📋 Certificate Verification</h3>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, marginTop: -8 }}>
+            Check each certificate that has been collected. Upload scanned copies if available.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {(Object.entries(certLabels) as [string, { key: keyof typeof form; label: string }][]).map(([certType, { key, label }]) => (
+              <div key={certType} style={{ background: form[key] ? 'rgba(16,185,129,0.05)' : 'var(--bg-tertiary)', borderRadius: 10, padding: '14px 16px', border: `1px solid ${form[key] ? 'rgba(16,185,129,0.25)' : 'var(--border-light)'}`, transition: 'all 0.2s' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer', userSelect: 'none', marginBottom: form[key] ? 12 : 0 }}>
+                  <input type="checkbox" checked={form[key] as boolean} onChange={e => setForm(f => ({ ...f, [key]: e.target.checked }))} style={{ width: 18, height: 18, accentColor: 'var(--teal)', cursor: 'pointer' }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600 }}>{label}</div>
+                    {form[key] && <div style={{ fontSize: 12, color: 'var(--teal)', marginTop: 2 }}>✓ Marked as collected</div>}
+                  </div>
+                </label>
+                {form[key] && (
+                  <div>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => certRefs[certType as keyof typeof certRefs].current?.click()}>
+                      <FiUpload size={12} /> {certFiles[certType].file ? 'Change File' : 'Upload Scan'}
+                    </button>
+                    <input type="file" ref={certRefs[certType as keyof typeof certRefs]} accept=".jpg,.jpeg,.png,.webp,.pdf" onChange={handleCertFileChange(certType)} style={{ display: 'none' }} />
+                    {certFiles[certType].preview && <img src={certFiles[certType].preview!} alt="cert" style={{ display: 'block', maxWidth: 140, maxHeight: 90, borderRadius: 6, objectFit: 'cover', border: '1px solid var(--border)', marginTop: 8 }} />}
+                    {certFiles[certType].file && !certFiles[certType].preview && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--teal)', marginTop: 8 }}>
+                        <FiFileText /> {certFiles[certType].file!.name}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
-        </form>
-      </div>
+        </div>
+
+        {/* SECTION 6: Consent */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-heading">📝 Consent</h3>
+          <div style={{ background: form.consent_given ? 'rgba(16,185,129,0.06)' : 'var(--bg-tertiary)', borderRadius: 10, padding: '16px 18px', border: `2px solid ${form.consent_given ? 'rgba(16,185,129,0.35)' : 'var(--border-light)'}`, transition: 'all 0.2s', marginBottom: form.consent_given ? 16 : 0 }}>
+            <label style={{ display: 'flex', alignItems: 'flex-start', gap: 14, cursor: 'pointer', userSelect: 'none' }}>
+              <input type="checkbox" checked={form.consent_given} onChange={e => setForm(f => ({ ...f, consent_given: e.target.checked }))} style={{ width: 20, height: 20, accentColor: 'var(--teal)', cursor: 'pointer', marginTop: 3, flexShrink: 0 }} />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>I / We hereby give consent</div>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.65 }}>
+                  I/We hereby consent to the enrollment of the above-named student at <strong>Nalam Academy — EPFT</strong> and agree to abide by all rules, regulations, and terms and conditions of the institution.
+                </div>
+                {form.consent_given && <div style={{ fontSize: 12, color: 'var(--teal)', marginTop: 8, fontWeight: 700 }}>✓ Consent confirmed</div>}
+              </div>
+            </label>
+          </div>
+          {form.consent_given && (
+            <div style={{ background: 'var(--bg-tertiary)', borderRadius: 10, padding: '14px 16px', border: '1px solid var(--border-light)' }}>
+              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                <FiImage size={14} /> Consent Signature / Document <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>(JPG only)</span>
+              </label>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => consentImgRef.current?.click()}>
+                <FiUpload size={12} /> {consentImageFile ? 'Change Image' : 'Upload Consent Image'}
+              </button>
+              <input type="file" ref={consentImgRef} accept=".jpg,.jpeg" onChange={handleConsentImageChange} style={{ display: 'none' }} />
+              {consentImagePreview && (
+                <div style={{ marginTop: 12 }}>
+                  <img src={consentImagePreview} alt="consent" style={{ maxWidth: 220, maxHeight: 140, borderRadius: 8, border: '2px solid rgba(16,185,129,0.3)', objectFit: 'cover', display: 'block' }} />
+                  <div style={{ fontSize: 12, color: 'var(--teal)', marginTop: 6, fontWeight: 600 }}>✓ {consentImageFile?.name}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Submit */}
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button type="submit" className="btn btn-primary" disabled={loading} style={{ minWidth: 160 }}>
+            {loading ? '⏳ Adding Student...' : '✓ Add Student'}
+          </button>
+          <button type="button" className="btn btn-secondary" onClick={() => navigate('/students')} disabled={loading}>Cancel</button>
+        </div>
+      </form>
     </div>
   );
 };

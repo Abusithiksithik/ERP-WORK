@@ -3,18 +3,17 @@ import { query } from '../config/db';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 
 const router = Router();
-router.use(authenticate, authorize('super_admin', 'admin', 'faculty'));
+router.use(authenticate, authorize('super_admin', 'admin', 'incharge', 'teacher'));
 
 // GET /api/dashboard/stats
 router.get('/stats', async (_req: AuthRequest, res: Response) => {
   try {
-    const [students, courses, faculty, revenue, activeStudents, pendingPayments] = await Promise.all([
+    const [students, courses, faculty, activeStudents, pendingPayments] = await Promise.all([
       query('SELECT COUNT(*) FROM students'),
-      query('SELECT COUNT(*) FROM courses WHERE status=\'active\''),
-      query('SELECT COUNT(*) FROM users WHERE role=\'faculty\''),
-      query('SELECT COALESCE(SUM(amount),0) as total FROM payments WHERE status=\'verified\''),
-      query('SELECT COUNT(*) FROM students WHERE status=\'active\''),
-      query('SELECT COUNT(*) FROM payments WHERE status=\'pending\''),
+      query("SELECT COUNT(*) FROM courses WHERE status='active'"),
+      query("SELECT COUNT(*) FROM users WHERE role IN ('incharge','teacher')"),
+      query("SELECT COUNT(*) FROM students WHERE status='active'"),
+      query("SELECT COUNT(*) FROM payments WHERE status='pending'"),
     ]);
     res.json({
       success: true,
@@ -22,11 +21,25 @@ router.get('/stats', async (_req: AuthRequest, res: Response) => {
         totalStudents: parseInt(students.rows[0].count),
         totalCourses: parseInt(courses.rows[0].count),
         totalFaculty: parseInt(faculty.rows[0].count),
-        totalRevenue: parseFloat(revenue.rows[0].total),
         activeStudents: parseInt(activeStudents.rows[0].count),
         pendingPayments: parseInt(pendingPayments.rows[0].count),
       }
     });
+  } catch (err) { console.error(err); res.status(500).json({ success: false, message: 'Server error' }); }
+});
+
+// GET /api/dashboard/recent-students
+router.get('/recent-students', async (_req: AuthRequest, res: Response) => {
+  try {
+    const result = await query(`
+      SELECT s.student_id, s.full_name, c.course_name, s.status, s.admission_date
+      FROM students s
+      LEFT JOIN courses c ON c.id = s.course_id
+      WHERE s.status != 'discontinued'
+      ORDER BY s.created_at DESC
+      LIMIT 5
+    `);
+    res.json({ success: true, data: result.rows });
   } catch (err) { console.error(err); res.status(500).json({ success: false, message: 'Server error' }); }
 });
 

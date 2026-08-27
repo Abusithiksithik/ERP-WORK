@@ -2,7 +2,8 @@ export interface User {
   id: number;
   full_name: string;
   email: string;
-  role: 'super_admin' | 'admin' | 'faculty' | 'student';
+  role: 'super_admin' | 'admin' | 'incharge' | 'teacher' | 'student';
+  photo_url?: string;
   is_active: boolean;
   mobile?: string;
   specialization?: string;
@@ -21,22 +22,24 @@ export interface Student {
   address?: string;
   parent_name?: string;
   parent_mobile?: string;
+  parent_present?: boolean;
+  guardian_type?: string;
   photo_url?: string;
   course_id?: number;
   batch_id?: number;
   course_name?: string;
   batch_name?: string;
+  category_name?: string;
   admission_date: string;
   status: 'active' | 'inactive' | 'suspended' | 'discontinued';
   discontinued_at?: string;
   discontinued_reason?: string;
-  // Certificate collection flags
   cert_10th_collected?: boolean;
   cert_12th_collected?: boolean;
   cert_diploma_collected?: boolean;
-  disc_cert_10th?: boolean;
-  disc_cert_12th?: boolean;
-  disc_cert_diploma?: boolean;
+  cert_10th_url?: string;
+  cert_12th_url?: string;
+  cert_diploma_url?: string;
   created_at: string;
 }
 
@@ -68,9 +71,10 @@ export interface Batch {
   batch_name: string;
   course_id: number;
   course_name?: string;
+  category_name?: string;
   start_date?: string;
   end_date?: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'completed';
   student_count?: number;
 }
 
@@ -89,12 +93,14 @@ export interface LmsVideo {
   module_id?: number;
   course_name?: string;
   module_name?: string;
+  category_name?: string;
   title: string;
   description?: string;
   thumbnail_url?: string;
   video_url: string;
   is_free: boolean;
   is_published: boolean;
+  locked?: boolean;
   order_number: number;
   duration_seconds?: number;
   created_at: string;
@@ -134,6 +140,13 @@ export interface Payment {
   enrollment_id?: number;
   payment_method_id?: number;
   method_type?: string;
+  course_name?: string;
+  category_name?: string;
+  batch_name?: string;
+  fee_type?: 'application' | 'course' | 'hostel' | 'uniform' | 'other';
+  total_fee?: number;
+  total_paid_for_enrollment?: number;
+  balance_amount?: number;
   amount: number;
   payment_date: string;
   transaction_reference?: string;
@@ -149,8 +162,11 @@ export interface Enrollment {
   student_id: number;
   student_name?: string;
   student_code?: string;
+  student_mobile?: string;
+  student_email?: string;
   course_id: number;
   course_name?: string;
+  category_name?: string;
   batch_id?: number;
   batch_name?: string;
   status: 'pending' | 'approved' | 'rejected' | 'completed';
@@ -158,6 +174,16 @@ export interface Enrollment {
   approved_by?: number;
   approved_at?: string;
   notes?: string;
+  // Fee breakdown fields
+  application_fee: number;
+  course_fee: number;
+  hostel_fee: number;
+  uniform_fee: number;
+  materials_fee: number;
+  total_fee: number;
+  amount_paid: number;
+  balance_amount: number;
+  // Progress
   total_videos?: number;
   completed_videos?: number;
 }
@@ -178,7 +204,27 @@ export interface DashboardStats {
   totalStudents: number;
   totalCourses: number;
   totalFaculty: number;
-  totalRevenue: number;
   activeStudents: number;
   pendingPayments: number;
+}
+
+export interface RecentStudent {
+  student_id: string;
+  full_name: string;
+  course_name?: string;
+  batch_name?: string;
+  status: string;
+  admission_date: string;
+}
+
+export interface BatchStudent {
+  id: number;
+  student_id: string;
+  full_name: string;
+  mobile: string;
+  email: string;
+  status: string;
+  enrollment_status?: string;
+  amount_paid?: number;
+  balance_amount?: number;
 }

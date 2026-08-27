@@ -30,3 +30,8 @@ export const authorize = (...roles: string[]) => {
     next();
   };
 };
+
+// Convenience helpers
+export const isAdmin = (role: string) => ['super_admin', 'admin'].includes(role);
+export const isIncharge = (role: string) => role === 'incharge';
+export const isTeacher = (role: string) => role === 'teacher';

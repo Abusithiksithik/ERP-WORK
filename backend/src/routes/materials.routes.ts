@@ -27,7 +27,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
 });
 
 
-router.post('/', authorize('super_admin', 'admin', 'faculty'), uploadMaterial.single('file'), async (req: AuthRequest, res: Response) => {
+router.post('/', authorize('super_admin', 'admin', 'incharge'), uploadMaterial.single('file'), async (req: AuthRequest, res: Response) => {
   try {
     const { course_id, module_id, title, description, is_free } = req.body;
     if (!course_id || !title || !req.file) { res.status(400).json({ success: false, message: 'course_id, title and file required' }); return; }
@@ -52,7 +52,7 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
   } catch (err) { console.error(err); res.status(500).json({ success: false, message: 'Server error' }); }
 });
 
-router.put('/:id', authorize('super_admin', 'admin', 'faculty'), uploadMaterial.single('file'), async (req: AuthRequest, res: Response) => {
+router.put('/:id', authorize('super_admin', 'admin', 'incharge'), uploadMaterial.single('file'), async (req: AuthRequest, res: Response) => {
   try {
     const existing = await query('SELECT * FROM lms_materials WHERE id=$1', [req.params.id]);
     if (existing.rows.length === 0) { res.status(404).json({ success: false, message: 'Not found' }); return; }

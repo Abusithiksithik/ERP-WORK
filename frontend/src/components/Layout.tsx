@@ -2,10 +2,8 @@ import React, { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
-  FiHome, FiUsers, FiVideo, FiFileText, FiDollarSign,
-  FiSettings, FiUser, FiLogOut, FiMenu, FiX,
-  FiGrid, FiUserCheck, FiCreditCard, FiCalendar, FiAlertCircle, FiUserX,
-  FiBookOpen, FiLayers, FiTag
+  FiHome, FiUsers, FiVideo, FiUser, FiLogOut, FiMenu, FiX, FiUserCheck,
+  FiCreditCard, FiCalendar, FiAlertCircle, FiUserX, FiDollarSign, FiSettings,
 } from 'react-icons/fi';
 
 const Layout: React.FC = () => {
@@ -14,45 +12,88 @@ const Layout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
-  // ✅ Logout: clear session → redirect to /login
+  const role = user?.role || '';
+  const isAdmin    = role === 'super_admin' || role === 'admin';
+  const isIncharge = role === 'incharge';
+  const isTeacher  = role === 'teacher';
+
+  const roleLabel: Record<string, string> = {
+    super_admin: 'Admin',
+    admin:       'Admin',
+    incharge:    'Incharge',
+    teacher:     'Teacher',
+  };
+
+  const roleColor: Record<string, string> = {
+    super_admin: 'var(--accent)',
+    admin:       'var(--accent)',
+    incharge:    '#f59e0b',
+    teacher:     '#10b981',
+  };
+
+  // ── Nav order as specified ─────────────────────────────────
+  // Students, Enrollment, Attendance, Videos, Payment Method,
+  // Discontinue, User, Profile, Dashboard
+  const navItems = [
+    {
+      to: '/students', icon: <FiUsers />, label: 'Students',
+      // Admin: full CRUD | Incharge: view only | Teacher: view only
+      show: isAdmin || isIncharge || isTeacher,
+    },
+    {
+      to: '/enrollments', icon: <FiUserCheck />, label: 'Enrollment',
+      // Admin: full CRUD | Incharge: view + approve | Teacher: no access
+      show: isAdmin || isIncharge,
+    },
+    {
+      to: '/attendance', icon: <FiCalendar />, label: 'Attendance',
+      // Admin: full | Incharge: view + mark | Teacher: mark + view own batches
+      show: isAdmin || isIncharge || isTeacher,
+    },
+    {
+      to: '/videos', icon: <FiVideo />, label: 'Videos',
+      // Admin: full CRUD | Teacher: upload + manage own | Incharge: no access
+      show: isAdmin || isTeacher,
+    },
+    {
+      to: '/payment-methods', icon: <FiDollarSign />, label: 'Payment Method',
+      // Admin only
+      show: isAdmin,
+    },
+    {
+      to: '/discontinued-students', icon: <FiUserX />, label: 'Discontinue',
+      // Admin only
+      show: isAdmin,
+    },
+    {
+      to: '/users', icon: <FiSettings />, label: 'User',
+      // Admin only
+      show: isAdmin,
+    },
+    {
+      to: '/profile', icon: <FiUser />, label: 'Profile',
+      // All roles
+      show: true,
+    },
+    {
+      to: '/', icon: <FiHome />, label: 'Dashboard',
+      // All roles
+      show: true,
+    },
+  ].filter(item => item.show);
+
   const handleLogout = () => {
     logout();
     navigate('/login', { replace: true });
   };
 
-  const isAdmin = user?.role === 'super_admin' || user?.role === 'admin';
-  const isFaculty = user?.role === 'faculty';
-  const isStudent = user?.role === 'student';
-
-  const roleLabel: Record<string, string> = {
-    super_admin: 'Super Admin',
-    admin: 'Admin',
-    faculty: 'Faculty',
-    student: 'Student',
-  };
-
-  const navItems = [
-    { to: '/', icon: <FiHome />, label: 'Dashboard', show: true },
-    { to: '/students', icon: <FiUsers />, label: 'Students', show: isAdmin },
-    { to: '/discontinued-students', icon: <FiUserX />, label: 'Discontinued', show: isAdmin },
-    { to: '/enrollments', icon: <FiUserCheck />, label: 'Enrollment', show: true },
-    { to: '/categories', icon: <FiTag />, label: 'Categories', show: isAdmin },
-    { to: '/courses', icon: <FiBookOpen />, label: 'Courses', show: isAdmin },
-    { to: '/batches', icon: <FiLayers />, label: 'Batches', show: isAdmin },
-    { to: '/modules', icon: <FiGrid />, label: 'Modules', show: isAdmin },
-    { to: '/videos', icon: <FiVideo />, label: 'Videos', show: isAdmin || isFaculty || isStudent },
-    { to: '/materials', icon: <FiFileText />, label: 'Materials', show: true },
-    { to: '/attendance', icon: <FiCalendar />, label: 'Attendance', show: isAdmin || isFaculty },
-    { to: '/payments', icon: <FiCreditCard />, label: 'Payments', show: isAdmin || isStudent },
-    { to: '/payment-methods', icon: <FiDollarSign />, label: 'Pay Methods', show: isAdmin },
-    { to: '/users', icon: <FiSettings />, label: 'Users', show: isAdmin },
-    { to: '/profile', icon: <FiUser />, label: 'Profile', show: true },
-  ].filter(item => item.show);
+  const avatarContent = user?.photo_url
+    ? <img src={user.photo_url} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+    : (user?.full_name?.charAt(0).toUpperCase() || '?');
 
   return (
     <div className="layout">
-
-      {/* ── Sidebar ── */}
+      {/* ── Sidebar ─────────────────────────────────── */}
       <aside className={`sidebar ${sidebarOpen ? 'open' : 'collapsed'}`}>
         <div className="sidebar-header">
           <div className="brand">
@@ -69,6 +110,20 @@ const Layout: React.FC = () => {
           </button>
         </div>
 
+        {sidebarOpen && (
+          <div style={{ padding: '4px 16px 12px', borderBottom: '1px solid var(--border-light)' }}>
+            <span style={{
+              display: 'inline-block',
+              fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+              background: `${roleColor[role] || 'var(--accent)'}22`,
+              color: roleColor[role] || 'var(--accent)',
+              textTransform: 'uppercase', letterSpacing: '0.5px',
+            }}>
+              {roleLabel[role] || role}
+            </span>
+          </div>
+        )}
+
         <nav className="sidebar-nav">
           {navItems.map(item => (
             <NavLink
@@ -83,43 +138,33 @@ const Layout: React.FC = () => {
           ))}
         </nav>
 
-        {/* ── Sidebar Footer: User info + Logout ── */}
         <div className="sidebar-footer">
           <div className="user-info">
-            <div className="user-avatar">{user?.full_name?.charAt(0).toUpperCase()}</div>
+            <div className="user-avatar" style={{ overflow: 'hidden' }}>{avatarContent}</div>
             {sidebarOpen && (
               <div className="user-details">
                 <span className="user-name">{user?.full_name}</span>
-                <span className="user-role">{roleLabel[user?.role || ''] || user?.role}</span>
+                <span className="user-role">{roleLabel[role] || role}</span>
               </div>
             )}
           </div>
-
-          {/* ✅ Logout button — always visible, label shown when sidebar open */}
           <button
             className="logout-btn"
             onClick={() => setShowLogoutModal(true)}
             title="Logout"
             style={{
-              display: 'flex',
-              alignItems: 'center',
+              display: 'flex', alignItems: 'center',
               gap: sidebarOpen ? 8 : 0,
               padding: sidebarOpen ? '8px 14px' : '8px',
               background: 'rgba(239,68,68,0.12)',
               border: '1px solid rgba(239,68,68,0.25)',
-              borderRadius: 10,
-              color: '#f87171',
-              cursor: 'pointer',
-              fontSize: 13,
-              fontWeight: 600,
-              transition: 'all 0.2s',
-              whiteSpace: 'nowrap',
+              borderRadius: 10, color: '#f87171',
+              cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              transition: 'all 0.2s', whiteSpace: 'nowrap',
               marginTop: sidebarOpen ? 8 : 0,
               width: sidebarOpen ? '100%' : 'auto',
               justifyContent: 'center',
             }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.22)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.12)'; }}
           >
             <FiLogOut size={16} />
             {sidebarOpen && <span>Logout</span>}
@@ -127,42 +172,30 @@ const Layout: React.FC = () => {
         </div>
       </aside>
 
-      {/* ── Main Content ── */}
+      {/* ── Main content ────────────────────────────── */}
       <div className={`main-content ${sidebarOpen ? '' : 'expanded'}`}>
         <header className="topbar">
           <button className="mobile-menu-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
             <FiMenu />
           </button>
-
           <div className="topbar-right">
             <div className="topbar-user">
-              <div className="user-avatar sm">{user?.full_name?.charAt(0).toUpperCase()}</div>
+              <div className="user-avatar sm" style={{ overflow: 'hidden' }}>{avatarContent}</div>
               <div style={{ lineHeight: 1.2 }}>
                 <div style={{ fontSize: 13, fontWeight: 600 }}>{user?.full_name}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{roleLabel[user?.role || ''] || user?.role}</div>
+                <div style={{ fontSize: 11, color: roleColor[role] || 'var(--text-muted)', fontWeight: 600 }}>{roleLabel[role] || role}</div>
               </div>
             </div>
-
-            {/* ✅ Logout button in topbar — always visible on desktop */}
             <button
               onClick={() => setShowLogoutModal(true)}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
+                display: 'flex', alignItems: 'center', gap: 6,
                 padding: '7px 16px',
                 background: 'rgba(239,68,68,0.1)',
                 border: '1px solid rgba(239,68,68,0.2)',
-                borderRadius: 8,
-                color: '#f87171',
-                cursor: 'pointer',
-                fontSize: 13,
-                fontWeight: 600,
-                transition: 'all 0.2s',
+                borderRadius: 8, color: '#f87171',
+                cursor: 'pointer', fontSize: 13, fontWeight: 600, transition: 'all 0.2s',
               }}
-              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.2)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.1)'; }}
-              title="Logout"
             >
               <FiLogOut size={14} />
               <span>Logout</span>
@@ -175,7 +208,7 @@ const Layout: React.FC = () => {
         </main>
       </div>
 
-      {/* ✅ Logout Confirmation Modal */}
+      {/* ── Logout Modal ─────────────────────────────── */}
       {showLogoutModal && (
         <div className="modal-overlay" style={{ zIndex: 9999 }}>
           <div className="modal" style={{ maxWidth: 380, textAlign: 'center' }}>
@@ -190,66 +223,24 @@ const Layout: React.FC = () => {
               </div>
               <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Confirm Logout</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-                Are you sure you want to logout?<br />
-                You will be redirected to the login page.
+                Are you sure you want to logout?
               </p>
             </div>
-
-            {/* Logged-in user info */}
-            <div style={{
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid var(--border-light)',
-              borderRadius: 10,
-              padding: '10px 16px',
-              marginBottom: 20,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 12,
-              textAlign: 'left',
-            }}>
-              <div className="user-avatar" style={{ width: 36, height: 36, fontSize: 15, flexShrink: 0 }}>
-                {user?.full_name?.charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{user?.full_name}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{user?.email}</div>
-              </div>
-            </div>
-
             <div style={{ display: 'flex', gap: 10 }}>
-              {/* Cancel */}
-              <button
-                className="btn btn-secondary"
-                style={{ flex: 1 }}
-                onClick={() => setShowLogoutModal(false)}
-                autoFocus
-              >
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowLogoutModal(false)} autoFocus>
                 Cancel
               </button>
-              {/* Confirm Logout */}
               <button
                 style={{
-                  flex: 1,
-                  padding: '10px 20px',
+                  flex: 1, padding: '10px 20px',
                   background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-                  border: 'none',
-                  borderRadius: 10,
-                  color: '#fff',
-                  fontWeight: 700,
-                  fontSize: 14,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 8,
-                  transition: 'opacity 0.2s',
+                  border: 'none', borderRadius: 10, color: '#fff',
+                  fontWeight: 700, fontSize: 14, cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                 }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.85'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; }}
                 onClick={handleLogout}
               >
-                <FiLogOut size={15} />
-                Yes, Logout
+                <FiLogOut size={15} /> Logout
               </button>
             </div>
           </div>

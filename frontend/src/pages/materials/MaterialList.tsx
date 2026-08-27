@@ -10,7 +10,7 @@ const fileTypeIcon: Record<string, string> = { pdf: '📄', ppt: '📊', docx: '
 
 const MaterialList: React.FC = () => {
   const { user } = useAuth();
-  const isAdmin = user?.role === 'super_admin' || user?.role === 'admin' || user?.role === 'faculty';
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'admin' || user?.role === 'teacher';
   const [materials, setMaterials] = useState<LmsMaterial[]>([]);
   const [courses, setCourses] = useState<Course[]>([]);
   const [filterCourse, setFilterCourse] = useState('');

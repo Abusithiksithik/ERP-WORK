@@ -1,85 +1,346 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { FiEdit2, FiArrowLeft, FiUser, FiPhone, FiMail, FiCalendar, FiBook, FiCheckSquare } from 'react-icons/fi';
+import {
+  FiEdit2, FiArrowLeft, FiUser, FiPhone, FiMail, FiCalendar,
+  FiBook, FiCheckSquare, FiDollarSign, FiMapPin, FiUsers,
+  FiTrash2, FiPlus, FiX, FiPackage,
+} from 'react-icons/fi';
+import { toast } from 'react-toastify';
 import api from '../../api/axios';
-import { Student, Enrollment } from '../../types';
+import { Student, Enrollment, Payment } from '../../types';
+import { useAuth } from '../../context/AuthContext';
+
+const fmt = (n: number | string) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
+const fmtDate = (d: string) => {
+  try { return new Date(d).toLocaleDateString('en-IN'); } catch { return d; }
+};
+
+interface StudentMaterial {
+  id: number;
+  student_id: number;
+  title: string;
+  description?: string;
+  material_type: string;
+  date_given: string;
+  given_by_name?: string;
+  created_at: string;
+}
+
+interface UniformStatus {
+  student_id: number | string;
+  status: 'received' | 'not_received' | 'pending';
+  notes?: string;
+}
 
 const StudentView: React.FC = () => {
   const { id } = useParams();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'admin' || user?.role === 'incharge';
+
   const [student, setStudent] = useState<Student | null>(null);
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [materials, setMaterials] = useState<StudentMaterial[]>([]);
+  const [uniform, setUniform] = useState<UniformStatus | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    api.get(`/students/${id}`).then(r => setStudent(r.data.data));
-    api.get('/enrollments', { params: { student_id: id } }).then(r => setEnrollments(r.data.data)).catch(() => {});
+  // Payment modal
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [payLoading, setPayLoading]     = useState(false);
+  const [payForm, setPayForm] = useState({
+    amount: '', payment_date: new Date().toISOString().split('T')[0],
+    payment_method: 'cash', notes: '',
+  });
+
+  // Material modal
+  const [showMaterialModal, setShowMaterialModal] = useState(false);
+  const [matLoading, setMatLoading]               = useState(false);
+  const [matForm, setMatForm] = useState({ title: '', description: '', date_given: new Date().toISOString().split('T')[0] });
+
+  // Uniform modal
+  const [showUniformModal, setShowUniformModal]   = useState(false);
+  const [uniformStatus, setUniformStatus]         = useState<'received' | 'not_received' | 'pending'>('pending');
+  const [uniformNotes, setUniformNotes]           = useState('');
+  const [uniformLoading, setUniformLoading]       = useState(false);
+
+  const fetchData = useCallback(async () => {
+    if (!id) return;
+    try {
+      const [studentRes, enrollRes, payRes] = await Promise.all([
+        api.get(`/students/${id}`),
+        api.get('/enrollments', { params: { student_id: id } }),
+        api.get('/payments', { params: { student_id: id } }),
+      ]);
+      setStudent(studentRes.data.data);
+      setEnrollments(enrollRes.data.data || []);
+      setPayments(payRes.data.data || []);
+    } catch (err) {
+      console.error(err);
+    }
+    // Materials and uniform
+    try {
+      const [matRes, uniRes] = await Promise.all([
+        api.get('/student-materials', { params: { student_id: id } }),
+        api.get(`/student-materials/uniform/${id}`),
+      ]);
+      setMaterials(matRes.data.data || []);
+      setUniform(uniRes.data.data || null);
+    } catch { /* non-critical */ }
+    setLoading(false);
   }, [id]);
 
-  if (!student) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>Loading...</div>;
+  useEffect(() => { fetchData(); }, [fetchData]);
 
-  const personalInfo = [
-    { icon: <FiUser />, label: 'Gender',       value: student.gender || '—' },
-    { icon: <FiPhone />, label: 'Mobile',       value: student.mobile },
-    { icon: <FiMail />,  label: 'Email',        value: student.email },
-    { icon: <FiCalendar />, label: 'Date of Birth', value: student.date_of_birth ? new Date(student.date_of_birth).toLocaleDateString() : '—' },
-  ];
+  // ── Computed fee values ──────────────────────────────────────────────
+  const enrollment = enrollments[0];
+  const courseFee  = enrollment
+    ? Number(enrollment.course_fee || 0)
+    : Number((student as any)?.course_fee_amount || 0);
+
+  const verifiedPayments = payments.filter(p => p.status === 'verified');
+  const totalPaid = verifiedPayments.reduce((s, p) => s + Number(p.amount), 0);
+  const balance   = Math.max(0, courseFee - totalPaid);
+  const isFree    = courseFee === 0;
+
+  // ── Record Payment ──────────────────────────────────────────────────
+  const handlePaySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!payForm.amount || Number(payForm.amount) <= 0) { toast.error('Enter a valid amount'); return; }
+    if (Number(payForm.amount) > balance) { toast.error(`Amount cannot exceed balance of ${fmt(balance)}`); return; }
+    if (!enrollment) { toast.error('No enrollment found for this student'); return; }
+
+    setPayLoading(true);
+    try {
+      // Resolve payment method to payment_method_id
+      let paymentMethodId = null;
+      try {
+        const pmRes = await api.get('/payment-methods');
+        const methods = pmRes.data.data || [];
+        const found = methods.find((m: any) => m.method_type === payForm.payment_method && m.is_enabled);
+        if (found) paymentMethodId = found.id;
+      } catch { /* use null if not found */ }
+
+      await api.post('/payments', {
+        student_id:        id,
+        enrollment_id:     enrollment.id,
+        payment_method_id: paymentMethodId,
+        amount:            Number(payForm.amount),
+        payment_date:      payForm.payment_date,
+        payment_type:      'course_fee',
+        notes:             payForm.notes || undefined,
+      });
+      toast.success('Payment recorded successfully!');
+      setShowPayModal(false);
+      setPayForm({ amount: '', payment_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '' });
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to record payment');
+    } finally { setPayLoading(false); }
+  };
+
+  // ── Delete Payment ──────────────────────────────────────────────────
+  const handleDeletePayment = async (paymentId: number) => {
+    if (!confirm('Delete this payment record? This will recalculate the balance.')) return;
+    try {
+      await api.delete(`/payments/${paymentId}`);
+      toast.success('Payment deleted — balance recalculated');
+      fetchData();
+    } catch {
+      toast.error('Failed to delete payment');
+    }
+  };
+
+  // ── Add Material ────────────────────────────────────────────────────
+  const handleMatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!matForm.title.trim()) { toast.error('Title is required'); return; }
+    setMatLoading(true);
+    try {
+      await api.post('/student-materials', {
+        student_id:    id,
+        title:         matForm.title.trim(),
+        description:   matForm.description || undefined,
+        material_type: 'book',
+        date_given:    matForm.date_given,
+      });
+      toast.success('Material record added!');
+      setShowMaterialModal(false);
+      setMatForm({ title: '', description: '', date_given: new Date().toISOString().split('T')[0] });
+      fetchData();
+    } catch { toast.error('Failed to add material'); }
+    finally { setMatLoading(false); }
+  };
+
+  // ── Update Uniform ──────────────────────────────────────────────────
+  const handleUniformSubmit = async () => {
+    setUniformLoading(true);
+    try {
+      await api.put(`/student-materials/uniform/${id}`, { status: uniformStatus, notes: uniformNotes || undefined });
+      toast.success('Uniform status updated!');
+      setShowUniformModal(false);
+      fetchData();
+    } catch { toast.error('Failed to update uniform status'); }
+    finally { setUniformLoading(false); }
+  };
+
+  const openUniformModal = () => {
+    setUniformStatus(uniform?.status || 'pending');
+    setUniformNotes(uniform?.notes || '');
+    setShowUniformModal(true);
+  };
+
+  // ── Delete Material ──────────────────────────────────────────────────
+  const handleDeleteMaterial = async (matId: number) => {
+    if (!confirm('Delete this material record?')) return;
+    try {
+      await api.delete(`/student-materials/${matId}`);
+      toast.success('Material record deleted');
+      fetchData();
+    } catch { toast.error('Failed to delete'); }
+  };
+
+  if (loading) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>Loading...</div>;
+  if (!student) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>Student not found</div>;
 
   const certItems = [
-    { label: '10th Marksheet',   collected: student.cert_10th_collected },
-    { label: '12th Marksheet',   collected: student.cert_12th_collected },
-    { label: 'TC',               collected: student.cert_diploma_collected },
+    { label: '10th Marksheet', collected: student.cert_10th_collected,  url: (student as any).cert_10th_url },
+    { label: '12th Marksheet', collected: student.cert_12th_collected,  url: (student as any).cert_12th_url },
+    { label: 'TC / Diploma',   collected: student.cert_diploma_collected, url: (student as any).cert_diploma_url },
   ];
 
-  const hasCerts = certItems.some(c => c.collected);
+  const uniformLabel: Record<string, { text: string; color: string; emoji: string }> = {
+    received:     { text: 'Received',     color: 'var(--teal)', emoji: '✅' },
+    not_received: { text: 'Not Received', color: 'var(--red)',  emoji: '❌' },
+    pending:      { text: 'Pending',      color: 'var(--amber)', emoji: '⏳' },
+  };
 
   return (
     <div>
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <Link to="/students" className="btn btn-secondary btn-sm"><FiArrowLeft /></Link>
-          <div><h1 className="page-title">Student Profile</h1></div>
-        </div>
-        <Link to={`/students/${id}/edit`} className="btn btn-primary"><FiEdit2 /> Edit</Link>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 20 }}>
-        {/* ── Left sidebar ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div className="card" style={{ textAlign: 'center' }}>
-            {student.photo_url
-              ? <img src={student.photo_url} alt={student.full_name} style={{ width: 120, height: 120, borderRadius: '50%', objectFit: 'cover', border: '3px solid var(--accent)', marginBottom: 16 }} />
-              : <div style={{ width: 120, height: 120, borderRadius: '50%', background: 'linear-gradient(135deg,var(--accent),var(--teal))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48, fontWeight: 800, color: '#fff', margin: '0 auto 16px' }}>{student.full_name.charAt(0)}</div>}
-            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>{student.full_name}</h2>
-            <code style={{ color: 'var(--accent)', fontSize: 14 }}>{student.student_id}</code>
-            <div style={{ marginTop: 12 }}><span className={`badge badge-${student.status}`}>{student.status}</span></div>
-            {student.address && <p style={{ marginTop: 16, fontSize: 13, color: 'var(--text-secondary)' }}>{student.address}</p>}
+          <div>
+            <h1 className="page-title">Student Profile</h1>
+            <p className="page-subtitle">{student.student_id}</p>
           </div>
-
-          {/* ── Certificate Verification card ── */}
-          {(hasCerts || true) && (
-            <div className="card">
-              <h3 className="section-heading" style={{ marginBottom: 12 }}><FiCheckSquare style={{ verticalAlign: 'middle', marginRight: 6 }} />Certificates</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {certItems.map(c => (
-                  <div key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, background: c.collected ? 'rgba(16,185,129,0.08)' : 'var(--bg-tertiary)', border: `1px solid ${c.collected ? 'rgba(16,185,129,0.3)' : 'var(--border-light)'}` }}>
-                    <span style={{ fontSize: 16 }}>{c.collected ? '✅' : '⬜'}</span>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{c.label}</div>
-                      <div style={{ fontSize: 11, color: c.collected ? 'var(--teal)' : 'var(--text-muted)' }}>{c.collected ? 'Collected' : 'Not collected'}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {isAdmin && (
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowPayModal(true)}
+              disabled={isFree || balance <= 0}
+              style={{ background: 'linear-gradient(135deg,var(--teal),#059669)' }}
+            >
+              <FiDollarSign /> Record Payment
+            </button>
+          )}
+          {isAdmin && (
+            <Link to={`/students/${id}/edit`} className="btn btn-secondary"><FiEdit2 /> Edit</Link>
           )}
         </div>
+      </div>
 
-        {/* ── Right content ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 20, alignItems: 'start' }}>
+        {/* ── Left column ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Personal info */}
+          {/* Photo + name */}
+          <div className="card" style={{ textAlign: 'center' }}>
+            {student.photo_url
+              ? <img src={student.photo_url} alt={student.full_name} style={{ width: 120, height: 120, borderRadius: '50%', objectFit: 'cover', border: '3px solid var(--accent)', margin: '0 auto 16px', display: 'block' }} />
+              : <div style={{ width: 120, height: 120, borderRadius: '50%', background: 'linear-gradient(135deg,var(--accent),var(--teal))', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 48, fontWeight: 800, color: '#fff', margin: '0 auto 16px' }}>
+                  {student.full_name.charAt(0)}
+                </div>
+            }
+            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>{student.full_name}</h2>
+            <code style={{ color: 'var(--accent)', fontSize: 13, background: 'rgba(99,102,241,0.1)', padding: '2px 10px', borderRadius: 6 }}>{student.student_id}</code>
+            <div style={{ marginTop: 12 }}>
+              <span className={`badge badge-${student.status}`} style={{ textTransform: 'capitalize', fontWeight: 700 }}>{student.status}</span>
+            </div>
+            {student.address && (
+              <div style={{ marginTop: 14, display: 'flex', alignItems: 'flex-start', gap: 6, justifyContent: 'center' }}>
+                <FiMapPin style={{ color: 'var(--text-muted)', marginTop: 2, flexShrink: 0 }} size={13} />
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', textAlign: 'left' }}>{student.address}</p>
+              </div>
+            )}
+          </div>
+
+          {/* ── Fee Summary ── */}
           <div className="card">
-            <h3 className="section-heading">Personal Information</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 className="section-heading" style={{ margin: 0 }}>
+                <FiDollarSign style={{ verticalAlign: 'middle', marginRight: 6 }} />Fee Summary
+              </h3>
+              {isAdmin && !isFree && balance > 0 && (
+                <button className="btn btn-sm" onClick={() => setShowPayModal(true)}
+                  style={{ fontSize: 11, padding: '4px 10px', background: 'rgba(16,185,129,0.12)', color: 'var(--teal)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 8 }}>
+                  + Pay
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div className="fee-summary-row">
+                <span className="fee-summary-label">Course Fee</span>
+                <span className="fee-summary-value">{isFree ? '₹0 (Free)' : fmt(courseFee)}</span>
+              </div>
+              <div className="fee-summary-row">
+                <span className="fee-summary-label">Total Paid</span>
+                <span className="fee-summary-value" style={{ color: 'var(--teal)' }}>{fmt(totalPaid)}</span>
+              </div>
+              <div className="fee-summary-row">
+                <span className="fee-summary-label">Balance</span>
+                <span className="fee-summary-value" style={{ color: balance > 0 ? 'var(--red)' : 'var(--teal)' }}>
+                  {balance > 0 ? fmt(balance) : '✓ Fully Paid'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Certificates */}
+          <div className="card">
+            <h3 className="section-heading" style={{ marginBottom: 12 }}>
+              <FiCheckSquare style={{ verticalAlign: 'middle', marginRight: 6 }} />Certificates
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {certItems.map(c => (
+                <div key={c.label} style={{
+                  padding: '8px 12px', borderRadius: 8,
+                  background: c.collected ? 'rgba(16,185,129,0.06)' : 'var(--bg-tertiary)',
+                  border: `1px solid ${c.collected ? 'rgba(16,185,129,0.25)' : 'var(--border-light)'}`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: c.url ? 6 : 0 }}>
+                    <span>{c.collected ? '✅' : '⬜'}</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{c.label}</div>
+                      <div style={{ fontSize: 11, color: c.collected ? 'var(--teal)' : 'var(--text-muted)' }}>
+                        {c.collected ? 'Collected' : 'Not collected'}
+                      </div>
+                    </div>
+                  </div>
+                  {c.url && (
+                    /\.(jpg|jpeg|png|webp)$/i.test(c.url)
+                      ? <img src={c.url} alt={c.label} style={{ maxWidth: '100%', maxHeight: 80, borderRadius: 6, marginTop: 4 }} />
+                      : <a href={c.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--accent)' }}>📄 View file</a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Right column ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Personal Info */}
+          <div className="card">
+            <h3 className="section-heading"><FiUser style={{ verticalAlign: 'middle', marginRight: 6 }} />Personal Information</h3>
             <div className="form-grid">
-              {personalInfo.map((item, i) => (
+              {[
+                { label: 'Gender',        value: student.gender || '—',   icon: <FiUser /> },
+                { label: 'Mobile',        value: student.mobile,           icon: <FiPhone /> },
+                { label: 'Email',         value: student.email,            icon: <FiMail /> },
+                { label: 'Date of Birth', value: student.date_of_birth ? fmtDate(student.date_of_birth) : '—', icon: <FiCalendar /> },
+                { label: 'Admission Date', value: student.admission_date ? fmtDate(student.admission_date) : '—', icon: <FiCalendar /> },
+              ].map((item, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                   <div style={{ color: 'var(--accent)', fontSize: 18, marginTop: 2 }}>{item.icon}</div>
                   <div>
@@ -91,59 +352,366 @@ const StudentView: React.FC = () => {
             </div>
           </div>
 
-          {/* Parent info */}
+          {/* Parent / Guardian */}
           <div className="card">
-            <h3 className="section-heading">Parent Information</h3>
-            <div className="form-grid">
+            <h3 className="section-heading"><FiUsers style={{ verticalAlign: 'middle', marginRight: 6 }} />
+              {(student as any).guardian_type === 'guardian' ? 'Guardian' : 'Parent / Guardian'}
+            </h3>
+            {student.parent_name ? (
               <div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Parent Name</div>
-                <div style={{ fontWeight: 500, marginTop: 2 }}>{student.parent_name || '—'}</div>
+                <div style={{ marginBottom: 12 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, padding: '3px 12px', borderRadius: 20, background: (student as any).guardian_type === 'guardian' ? 'rgba(139,92,246,0.12)' : 'rgba(99,102,241,0.12)', color: (student as any).guardian_type === 'guardian' ? 'var(--accent-2)' : 'var(--accent)' }}>
+                    {(student as any).guardian_type === 'guardian' ? '🧑‍🤝‍🧑 Guardian' : '👨‍👩‍👧 Parent'}
+                  </span>
+                </div>
+                <div className="form-grid">
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Name</div>
+                    <div style={{ fontWeight: 500, marginTop: 2 }}>{student.parent_name}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Mobile</div>
+                    <div style={{ fontWeight: 500, marginTop: 2 }}>{student.parent_mobile || '—'}</div>
+                  </div>
+                </div>
               </div>
-              <div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Parent Mobile</div>
-                <div style={{ fontWeight: 500, marginTop: 2 }}>{student.parent_mobile || '—'}</div>
-              </div>
-            </div>
+            ) : (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No parent / guardian present during admission</p>
+            )}
           </div>
 
-          {/* Academic / Enrollments */}
+          {/* Enrollment */}
           <div className="card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-              <h3 className="section-heading" style={{ margin: 0 }}><FiBook style={{ verticalAlign: 'middle', marginRight: 6 }} />Enrollments</h3>
-              <Link to="/enrollments" className="btn btn-secondary btn-sm" style={{ fontSize: 12 }}>Manage Enrollments →</Link>
-            </div>
-
+            <h3 className="section-heading"><FiBook style={{ verticalAlign: 'middle', marginRight: 6 }} />Course Enrollment</h3>
             {enrollments.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '24px 0' }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>📋</div>
                 <div style={{ fontWeight: 600, marginBottom: 6 }}>No Enrollments Yet</div>
-                <p style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 16 }}>
-                  This student has not been enrolled in any course yet.
-                </p>
-                <Link to="/enrollments" className="btn btn-primary" style={{ fontSize: 13 }}>
-                  Enroll Student
-                </Link>
+                {isAdmin && <Link to="/enrollments" className="btn btn-primary btn-sm">Enroll Now</Link>}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {enrollments.map(e => (
-                  <div key={e.id} style={{ background: 'var(--bg-tertiary)', borderRadius: 10, padding: '14px 16px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 12 }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 14 }}>{e.course_name}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                        {e.batch_name ? `Batch: ${e.batch_name}` : 'No batch assigned'}
-                        {' · '}
-                        Enrolled: {new Date(e.enrolled_at).toLocaleDateString()}
+                {enrollments.map(enr => (
+                  <div key={enr.id} style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: '14px 16px', border: '1px solid var(--border-light)' }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
+                      <div>
+                        {enr.category_name && (
+                          <span style={{ fontSize: 11, background: 'rgba(99,102,241,0.1)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 10, fontWeight: 700, display: 'inline-block', marginBottom: 4 }}>
+                            {enr.category_name}
+                          </span>
+                        )}
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>{enr.course_name}</div>
+                        {enr.batch_name && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>📅 {enr.batch_name}</div>}
                       </div>
+                      <span className={`badge badge-${enr.status}`}>{enr.status}</span>
                     </div>
-                    <span className={`badge badge-${e.status}`}>{e.status}</span>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                      Enrolled: {fmtDate(enr.enrolled_at)}
+                    </div>
+                    {enr.notes && (
+                      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--amber)', background: 'rgba(245,158,11,0.06)', borderRadius: 6, padding: '6px 10px', border: '1px solid rgba(245,158,11,0.15)' }}>
+                        📋 {enr.notes}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </div>
+
+          {/* ── Payment History ── */}
+          <div className="card">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <h3 className="section-heading" style={{ margin: 0 }}>
+                <FiDollarSign style={{ verticalAlign: 'middle', marginRight: 6 }} />Payment History
+              </h3>
+              {isAdmin && !isFree && balance > 0 && (
+                <button className="btn btn-sm" onClick={() => setShowPayModal(true)}
+                  style={{ background: 'linear-gradient(135deg,var(--teal),#059669)', color: '#fff', border: 'none', borderRadius: 8 }}>
+                  <FiPlus size={13} /> Record Payment
+                </button>
+              )}
+            </div>
+            {isFree ? (
+              <div style={{ padding: '16px', textAlign: 'center', color: 'var(--teal)', fontWeight: 600 }}>
+                🎓 Free Course — No fees required
+              </div>
+            ) : verifiedPayments.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+                No payment records yet.
+                {isAdmin && balance > 0 && (
+                  <div style={{ marginTop: 10 }}>
+                    <button className="btn btn-sm btn-primary" onClick={() => setShowPayModal(true)}>
+                      <FiPlus size={12} /> Record First Payment
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table className="payment-history-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Amount</th>
+                      <th>Method</th>
+                      <th>Notes</th>
+                      {isAdmin && <th>Delete</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {verifiedPayments.map(p => (
+                      <tr key={p.id}>
+                        <td style={{ whiteSpace: 'nowrap' }}>{fmtDate(p.payment_date)}</td>
+                        <td><span style={{ fontWeight: 700, color: 'var(--teal)' }}>{fmt(p.amount)}</span></td>
+                        <td style={{ textTransform: 'capitalize' }}>{p.method_type || (p as any).payment_method || '—'}</td>
+                        <td style={{ color: 'var(--text-muted)', maxWidth: 180 }}>
+                          {(p as any).payment_type && (
+                            <span style={{ fontSize: 11, background: 'rgba(99,102,241,0.1)', color: 'var(--accent)', padding: '1px 6px', borderRadius: 8, marginRight: 4, fontWeight: 700 }}>
+                              {(p as any).payment_type}
+                            </span>
+                          )}
+                          {p.notes || '—'}
+                        </td>
+                        {isAdmin && (
+                          <td>
+                            <button
+                              className="action-btn delete"
+                              onClick={() => handleDeletePayment(p.id)}
+                              title="Delete payment"
+                              style={{ padding: '4px 8px' }}
+                            >
+                              <FiTrash2 size={13} />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--bg-tertiary)', borderRadius: 8, display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Total Paid</span>
+                  <span style={{ fontWeight: 700, color: 'var(--teal)' }}>{fmt(totalPaid)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Materials Section ── */}
+          <div className="card">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <FiPackage style={{ color: 'var(--accent-2)', fontSize: 20 }} />
+              <h3 className="section-heading" style={{ margin: 0 }}>Materials & Uniform</h3>
+            </div>
+
+            <div className="materials-btn-group" style={{ marginBottom: 20 }}>
+              <button
+                type="button" className="material-btn"
+                onClick={() => { setMatForm({ title: '', description: '', date_given: new Date().toISOString().split('T')[0] }); setShowMaterialModal(true); }}
+                disabled={!isAdmin}
+              >
+                <span className="mat-icon">📚</span>
+                <span>Book / Material</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Add given material</span>
+              </button>
+              <button
+                type="button" className="material-btn"
+                onClick={openUniformModal}
+                disabled={!isAdmin}
+              >
+                <span className="mat-icon">👕</span>
+                <span>Uniform</span>
+                <span style={{ fontSize: 11, color: uniformLabel[uniform?.status || 'pending'].color }}>
+                  {uniformLabel[uniform?.status || 'pending'].emoji} {uniformLabel[uniform?.status || 'pending'].text}
+                </span>
+              </button>
+            </div>
+
+            {/* Materials list */}
+            {materials.length > 0 && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8 }}>
+                  Given Materials ({materials.length})
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {materials.map(m => (
+                    <div key={m.id} style={{ background: 'var(--bg-tertiary)', borderRadius: 8, padding: '10px 14px', border: '1px solid var(--border-light)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: 14 }}>📚 {m.title}</div>
+                        {m.description && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{m.description}</div>}
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                          Given: {fmtDate(m.date_given)} {m.given_by_name ? `by ${m.given_by_name}` : ''}
+                        </div>
+                      </div>
+                      {isAdmin && (
+                        <button className="action-btn delete" onClick={() => handleDeleteMaterial(m.id)} title="Delete" style={{ padding: '4px 8px', flexShrink: 0 }}>
+                          <FiTrash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* ── Record Payment Modal ── */}
+      {showPayModal && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">💰 Record Payment</h2>
+              <button className="modal-close" onClick={() => setShowPayModal(false)}><FiX /></button>
+            </div>
+            <div style={{ background: 'var(--bg-tertiary)', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Student</span>
+                <span style={{ fontWeight: 600 }}>{student.full_name}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Course Fee</span>
+                <span style={{ fontWeight: 600 }}>{fmt(courseFee)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Total Paid</span>
+                <span style={{ fontWeight: 600, color: 'var(--teal)' }}>{fmt(totalPaid)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Balance Due</span>
+                <span style={{ fontWeight: 700, color: 'var(--red)' }}>{fmt(balance)}</span>
+              </div>
+            </div>
+            <form onSubmit={handlePaySubmit}>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Amount ₹ *</label>
+                  <input
+                    type="number" className="form-control"
+                    value={payForm.amount}
+                    onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))}
+                    placeholder={`Max: ₹${balance.toLocaleString('en-IN')}`}
+                    min={1} max={balance} required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Date *</label>
+                  <input type="date" className="form-control"
+                    value={payForm.payment_date}
+                    onChange={e => setPayForm(p => ({ ...p, payment_date: e.target.value }))}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Payment Method</label>
+                <select className="form-control"
+                  value={payForm.payment_method}
+                  onChange={e => setPayForm(p => ({ ...p, payment_method: e.target.value }))}>
+                  <option value="cash">Cash</option>
+                  <option value="upi">GPay / UPI</option>
+                  <option value="bank">Bank Transfer</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Notes</label>
+                <input type="text" className="form-control"
+                  value={payForm.notes}
+                  onChange={e => setPayForm(p => ({ ...p, notes: e.target.value }))}
+                  placeholder="Optional notes" />
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button type="submit" className="btn btn-primary" disabled={payLoading} style={{ flex: 1 }}>
+                  {payLoading ? '⏳ Recording...' : '✓ Record Payment'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowPayModal(false)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add Material Modal ── */}
+      {showMaterialModal && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 440 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">📚 Add Book / Material</h2>
+              <button className="modal-close" onClick={() => setShowMaterialModal(false)}><FiX /></button>
+            </div>
+            <form onSubmit={handleMatSubmit}>
+              <div className="form-group">
+                <label className="form-label">Title / Name *</label>
+                <input type="text" className="form-control"
+                  value={matForm.title}
+                  onChange={e => setMatForm(p => ({ ...p, title: e.target.value }))}
+                  placeholder="e.g. IMR Study Material Volume 1" required />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <textarea className="form-control" rows={2}
+                  value={matForm.description}
+                  onChange={e => setMatForm(p => ({ ...p, description: e.target.value }))}
+                  placeholder="Optional notes about this material" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Date Given</label>
+                <input type="date" className="form-control"
+                  value={matForm.date_given}
+                  onChange={e => setMatForm(p => ({ ...p, date_given: e.target.value }))} />
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button type="submit" className="btn btn-primary" disabled={matLoading} style={{ flex: 1 }}>
+                  {matLoading ? '⏳ Adding...' : '✓ Add Material'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowMaterialModal(false)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Uniform Status Modal ── */}
+      {showUniformModal && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">👕 Uniform Status</h2>
+              <button className="modal-close" onClick={() => setShowUniformModal(false)}><FiX /></button>
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label className="form-label" style={{ marginBottom: 12 }}>Select uniform status:</label>
+              <div className="uniform-status-group">
+                {([
+                  { value: 'received',     label: '✅ Received',     cls: 'selected-received' },
+                  { value: 'not_received', label: '❌ Not Received', cls: 'selected-not_received' },
+                  { value: 'pending',      label: '⏳ Pending',      cls: 'selected-pending' },
+                ] as const).map(opt => (
+                  <button
+                    key={opt.value} type="button"
+                    className={`uniform-status-btn ${uniformStatus === opt.value ? opt.cls : ''}`}
+                    onClick={() => setUniformStatus(opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Notes (optional)</label>
+              <input type="text" className="form-control" value={uniformNotes}
+                onChange={e => setUniformNotes(e.target.value)} placeholder="e.g. Size L, given on 25 Aug" />
+            </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="btn btn-primary" onClick={handleUniformSubmit} disabled={uniformLoading} style={{ flex: 1 }}>
+                {uniformLoading ? '⏳ Saving...' : '✓ Save Status'}
+              </button>
+              <button className="btn btn-secondary" onClick={() => setShowUniformModal(false)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

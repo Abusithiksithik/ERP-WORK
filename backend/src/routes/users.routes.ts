@@ -6,6 +6,8 @@ import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 const router = Router();
 router.use(authenticate);
 
+const ALLOWED_ROLES = ['admin', 'incharge', 'teacher'];
+
 // GET /api/users
 router.get('/', authorize('super_admin', 'admin'), async (_req: AuthRequest, res: Response) => {
   try {
@@ -14,7 +16,7 @@ router.get('/', authorize('super_admin', 'admin'), async (_req: AuthRequest, res
               f.mobile, f.specialization
        FROM users u
        LEFT JOIN faculty f ON f.user_id = u.id
-       WHERE u.role IN ('admin','faculty')
+       WHERE u.role IN ('admin','incharge','teacher')
        ORDER BY u.created_at DESC`
     );
     res.json({ success: true, data: result.rows });
@@ -32,8 +34,8 @@ router.post('/', authorize('super_admin', 'admin'), async (req: AuthRequest, res
       res.status(400).json({ success: false, message: 'full_name, email, password, role required' });
       return;
     }
-    if (!['admin', 'faculty'].includes(role)) {
-      res.status(400).json({ success: false, message: 'Role must be admin or faculty' });
+    if (!ALLOWED_ROLES.includes(role)) {
+      res.status(400).json({ success: false, message: `Role must be one of: ${ALLOWED_ROLES.join(', ')}` });
       return;
     }
     const exists = await query('SELECT id FROM users WHERE email = $1', [email]);
@@ -47,8 +49,13 @@ router.post('/', authorize('super_admin', 'admin'), async (req: AuthRequest, res
       [full_name, email, hash, role]
     );
     const user = userResult.rows[0];
-    if (role === 'faculty') {
-      await query('INSERT INTO faculty (user_id, mobile, specialization) VALUES ($1,$2,$3)', [user.id, mobile || null, specialization || null]);
+    // Store mobile/specialization for all user types (not just faculty)
+    if (mobile || specialization) {
+      await query(
+        `INSERT INTO faculty (user_id, mobile, specialization) VALUES ($1,$2,$3)
+         ON CONFLICT (user_id) DO UPDATE SET mobile=$2, specialization=$3`,
+        [user.id, mobile || null, specialization || null]
+      );
     }
     res.status(201).json({ success: true, data: user });
   } catch (err) {
@@ -81,6 +88,10 @@ router.get('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
 router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { full_name, email, role, is_active, mobile, specialization, password } = req.body;
+    if (role && !ALLOWED_ROLES.includes(role)) {
+      res.status(400).json({ success: false, message: `Role must be one of: ${ALLOWED_ROLES.join(', ')}` });
+      return;
+    }
     let updateQuery = 'UPDATE users SET full_name=$1, email=$2, role=$3, is_active=$4';
     const params: unknown[] = [full_name, email, role, is_active];
     if (password) {
@@ -95,13 +106,11 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
       res.status(404).json({ success: false, message: 'User not found' });
       return;
     }
-    if (role === 'faculty') {
-      await query(
-        `INSERT INTO faculty (user_id, mobile, specialization) VALUES ($1,$2,$3)
-         ON CONFLICT (user_id) DO UPDATE SET mobile=$2, specialization=$3`,
-        [req.params.id, mobile || null, specialization || null]
-      );
-    }
+    await query(
+      `INSERT INTO faculty (user_id, mobile, specialization) VALUES ($1,$2,$3)
+       ON CONFLICT (user_id) DO UPDATE SET mobile=$2, specialization=$3`,
+      [req.params.id, mobile || null, specialization || null]
+    );
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     console.error(err);
@@ -112,7 +121,7 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
 // DELETE /api/users/:id
 router.delete('/:id', authorize('super_admin'), async (req: AuthRequest, res: Response) => {
   try {
-    await query('DELETE FROM users WHERE id=$1 AND role NOT IN (\'super_admin\')', [req.params.id]);
+    await query(`DELETE FROM users WHERE id=$1 AND role NOT IN ('super_admin')`, [req.params.id]);
     res.json({ success: true, message: 'User deleted' });
   } catch (err) {
     console.error(err);

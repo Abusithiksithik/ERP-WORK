@@ -11,28 +11,30 @@ import { hashPassword } from './utils/bcrypt';
 dotenv.config();
 
 // Routes
-import authRoutes from './routes/auth.routes';
-import usersRoutes from './routes/users.routes';
-import studentsRoutes from './routes/students.routes';
-import categoriesRoutes from './routes/categories.routes';
-import coursesRoutes from './routes/courses.routes';
-import batchesRoutes from './routes/batches.routes';
-import modulesRoutes from './routes/modules.routes';
-import videosRoutes from './routes/videos.routes';
-import materialsRoutes from './routes/materials.routes';
+import authRoutes         from './routes/auth.routes';
+import usersRoutes        from './routes/users.routes';
+import studentsRoutes     from './routes/students.routes';
+import categoriesRoutes   from './routes/categories.routes';
+import coursesRoutes      from './routes/courses.routes';
+import batchesRoutes      from './routes/batches.routes';
+import modulesRoutes      from './routes/modules.routes';
+import videosRoutes       from './routes/videos.routes';
+import materialsRoutes    from './routes/materials.routes';
 import paymentMethodsRoutes from './routes/paymentMethods.routes';
-import paymentsRoutes from './routes/payments.routes';
-import enrollmentsRoutes from './routes/enrollments.routes';
-import attendanceRoutes from './routes/attendance.routes';
-import dashboardRoutes from './routes/dashboard.routes';
+import paymentsRoutes     from './routes/payments.routes';
+import enrollmentsRoutes  from './routes/enrollments.routes';
+import attendanceRoutes   from './routes/attendance.routes';
+import dashboardRoutes    from './routes/dashboard.routes';
+import profileRoutes            from './routes/profile.routes';
+import studentMaterialsRoutes   from './routes/student_materials.routes';
 
-const app = express();
-const PORT = process.env.PORT || 5000;
+const app  = express();
+const PORT = process.env.PORT || 5007;
 
 // Middleware
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: '*',  // allow all origins — vite proxy handles it
   credentials: true,
 }));
 app.use(morgan('dev'));
@@ -43,27 +45,29 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/users', usersRoutes);
-app.use('/api/students', studentsRoutes);
-app.use('/api/categories', categoriesRoutes);
-app.use('/api/courses', coursesRoutes);
-app.use('/api/batches', batchesRoutes);
-app.use('/api/modules', modulesRoutes);
-app.use('/api/videos', videosRoutes);
-app.use('/api/materials', materialsRoutes);
+app.use('/api/auth',           authRoutes);
+app.use('/api/users',          usersRoutes);
+app.use('/api/students',       studentsRoutes);
+app.use('/api/categories',     categoriesRoutes);
+app.use('/api/courses',        coursesRoutes);
+app.use('/api/batches',        batchesRoutes);
+app.use('/api/modules',        modulesRoutes);
+app.use('/api/videos',         videosRoutes);
+app.use('/api/materials',      materialsRoutes);
 app.use('/api/payment-methods', paymentMethodsRoutes);
-app.use('/api/payments', paymentsRoutes);
-app.use('/api/enrollments', enrollmentsRoutes);
-app.use('/api/attendance', attendanceRoutes);
-app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/payments',       paymentsRoutes);
+app.use('/api/enrollments',    enrollmentsRoutes);
+app.use('/api/attendance',     attendanceRoutes);
+app.use('/api/dashboard',      dashboardRoutes);
+app.use('/api/profile',          profileRoutes);
+app.use('/api/student-materials', studentMaterialsRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ success: true, message: 'EPFT API is running', timestamp: new Date().toISOString() });
 });
 
-// 404 handler
+// 404
 app.use((_req, res) => {
   res.status(404).json({ success: false, message: 'Route not found' });
 });
@@ -74,7 +78,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ success: false, message: err.message || 'Internal Server Error' });
 });
 
-// Initialize DB and start server
+// ── DB Init ─────────────────────────────────────────────────────
 const initDb = async () => {
   const maxRetries = 10;
   let retries = 0;
@@ -90,7 +94,7 @@ const initDb = async () => {
     }
   }
 
-  // Run schema
+  // Run schema (CREATE TABLE IF NOT EXISTS — safe)
   try {
     const schemaPath = path.join(__dirname, '../../database/schema.sql');
     if (fs.existsSync(schemaPath)) {
@@ -102,20 +106,50 @@ const initDb = async () => {
     console.error('Schema error:', err);
   }
 
-  // Run seed with real bcrypt hash
+  // Run V2 migration (guardian_type, student_materials, master courses, etc.)
   try {
-    const seedPath = path.join(__dirname, '../../database/seed.sql');
-    if (fs.existsSync(seedPath)) {
-      const hash = await hashPassword('Admin@123');
-      let seed = fs.readFileSync(seedPath, 'utf8');
-      // Replace placeholder hash with real one
-      seed = seed.replace(
-        `'$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi'`,
-        `'${hash}'`
-      );
-      await pool.query(seed);
-      console.log('✅ Seed data applied');
+    const migV2Path = path.join(__dirname, '../../database/migrate_v2.sql');
+    if (fs.existsSync(migV2Path)) {
+      const migV2 = fs.readFileSync(migV2Path, 'utf8');
+      await pool.query(migV2);
+      console.log('✅ Migration V2 applied');
     }
+  } catch (err) {
+    console.error('Migration V2 error:', err);
+  }
+
+  // Run sample seed (idempotent — safe to run every time)
+  try {
+    const seedPath = path.join(__dirname, '../../database/seed_sample.sql');
+    if (fs.existsSync(seedPath)) {
+      const seed = fs.readFileSync(seedPath, 'utf8');
+      await pool.query(seed);
+      console.log('✅ Sample data seeded');
+    }
+  } catch (err) {
+    console.error('Sample seed error:', err);
+  }
+
+  // Seed: generate hash HERE on this server so bcryptjs version matches
+  try {
+    // Generate password hash on this server
+    const hash = await hashPassword('Admin@123');
+    console.log('✅ Generated password hash for Admin@123');
+
+    // Upsert all default accounts
+    await pool.query(`
+      INSERT INTO users (full_name, email, password_hash, role, is_active)
+      VALUES
+        ('Super Admin',   'admin@nalamacademy.com',     $1, 'super_admin', true),
+        ('Admin User',    'admin2@nalamacademy.com',    $1, 'admin',       true),
+        ('Incharge User', 'incharge@nalamacademy.com',  $1, 'incharge',    true),
+        ('Teacher User',  'teacher@nalamacademy.com',   $1, 'teacher',     true)
+      ON CONFLICT (email) DO UPDATE
+        SET password_hash = EXCLUDED.password_hash,
+            role          = EXCLUDED.role,
+            is_active     = true
+    `, [hash]);
+    console.log('✅ Default users seeded (password: Admin@123)');
   } catch (err) {
     console.error('Seed error:', err);
   }
@@ -126,6 +160,11 @@ initDb().then(() => {
     console.log(`🚀 EPFT Backend running on port ${PORT}`);
     console.log(`📍 API: http://localhost:${PORT}/api`);
     console.log(`🏫 Nalam Academy - EPFT System`);
+    console.log(`\n📋 Default Accounts (password: Admin@123):`);
+    console.log(`   Super Admin : admin@nalamacademy.com`);
+    console.log(`   Admin       : admin2@nalamacademy.com`);
+    console.log(`   Incharge    : incharge@nalamacademy.com`);
+    console.log(`   Teacher     : teacher@nalamacademy.com`);
   });
 }).catch(err => {
   console.error('Failed to initialize:', err);

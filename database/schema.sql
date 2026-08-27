@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS users (
     full_name VARCHAR(150) NOT NULL,
     email VARCHAR(150) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    role VARCHAR(20) NOT NULL CHECK (role IN ('super_admin', 'admin', 'faculty', 'student')),
+    role VARCHAR(20) NOT NULL CHECK (role IN ('super_admin', 'admin', 'incharge', 'teacher', 'student')),
     is_active BOOLEAN DEFAULT true,
     reset_token VARCHAR(255),
     reset_token_expires TIMESTAMPTZ,
@@ -270,6 +270,10 @@ CREATE TABLE IF NOT EXISTS enrollments (
     approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     approved_at TIMESTAMPTZ,
     notes TEXT,
+    application_fee NUMERIC(10,2) DEFAULT 0,
+    course_fee NUMERIC(10,2) DEFAULT 0,
+    materials_fee NUMERIC(10,2) DEFAULT 0,
+    total_fee NUMERIC(10,2) GENERATED ALWAYS AS (COALESCE(application_fee,0) + COALESCE(course_fee,0) + COALESCE(materials_fee,0)) STORED,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(student_id, course_id)
@@ -349,6 +353,52 @@ CREATE TABLE IF NOT EXISTS faculty (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+
+-- ============================================================
+-- MIGRATIONS (safe, idempotent)
+-- ============================================================
+
+
+-- Fee columns on enrollments (safe migration)
+ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS application_fee NUMERIC(10,2) DEFAULT 0;
+ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS course_fee NUMERIC(10,2) DEFAULT 0;
+ALTER TABLE enrollments ADD COLUMN IF NOT EXISTS materials_fee NUMERIC(10,2) DEFAULT 0;
+-- total_fee as generated column — only add if not already there
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='enrollments' AND column_name='total_fee') THEN
+    ALTER TABLE enrollments ADD COLUMN total_fee NUMERIC(10,2) GENERATED ALWAYS AS (COALESCE(application_fee,0) + COALESCE(course_fee,0) + COALESCE(materials_fee,0)) STORED;
+  END IF;
+END $$;
+
+-- Change 1: Update role constraint to include incharge/teacher
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+  CHECK (role IN ('super_admin', 'admin', 'incharge', 'teacher', 'student'));
+
+-- Change 4: Certificate URL columns
+ALTER TABLE students ADD COLUMN IF NOT EXISTS cert_10th_url VARCHAR(255);
+ALTER TABLE students ADD COLUMN IF NOT EXISTS cert_12th_url VARCHAR(255);
+ALTER TABLE students ADD COLUMN IF NOT EXISTS cert_diploma_url VARCHAR(255);
+
+-- Change 4: Parent presence flag
+ALTER TABLE students ADD COLUMN IF NOT EXISTS parent_present BOOLEAN DEFAULT false;
+
+-- Change 8: Profile photo for users
+ALTER TABLE users ADD COLUMN IF NOT EXISTS photo_url VARCHAR(255);
+
+-- Existing cert collection flags (ensure they exist)
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='students' AND column_name='cert_10th_collected') THEN
+    ALTER TABLE students ADD COLUMN cert_10th_collected BOOLEAN DEFAULT false;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='students' AND column_name='cert_12th_collected') THEN
+    ALTER TABLE students ADD COLUMN cert_12th_collected BOOLEAN DEFAULT false;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='students' AND column_name='cert_diploma_collected') THEN
+    ALTER TABLE students ADD COLUMN cert_diploma_collected BOOLEAN DEFAULT false;
+  END IF;
+END $$;
 
 -- ============================================================
 -- UPDATED_AT TRIGGER FUNCTION

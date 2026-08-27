@@ -1,33 +1,34 @@
 import { Router, Response } from 'express';
-import { query } from '../config/db';
-import { hashPassword } from '../utils/bcrypt';
+import { pool, query } from '../config/db';
 import { generateStudentId } from '../utils/studentId';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
-import { uploadPhoto } from '../middleware/upload';
+import { uploadPhoto, uploadCertificate } from '../middleware/upload';
 import { stringify } from 'csv-stringify/sync';
-import path from 'path';
 
 const router = Router();
 router.use(authenticate);
 
-// ── Validation helper ──────────────────────────────────────────
+// ── Validation helpers ──────────────────────────────────────────
 const MOBILE_REGEX = /^[6-9]\d{9}$/;
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EMAIL_REGEX  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function validateStudentInput(body: any): string | null {
   const { full_name, mobile, email } = body;
-  if (!full_name || String(full_name).trim().length < 3) return 'Student name must be at least 3 characters';
-  if (String(full_name).trim().length > 150) return 'Student name must be under 150 characters';
+  if (!full_name || String(full_name).trim().length < 3)
+    return 'Student name must be at least 3 characters';
+  if (String(full_name).trim().length > 150)
+    return 'Student name must be under 150 characters';
   if (!mobile) return 'Mobile number is required';
-  if (!MOBILE_REGEX.test(String(mobile).trim())) return 'Invalid Mobile Number — must be 10 digits starting with 6, 7, 8, or 9';
+  if (!MOBILE_REGEX.test(String(mobile).trim()))
+    return 'Invalid Mobile Number — must be 10 digits starting with 6, 7, 8, or 9';
   if (!email) return 'Email is required';
-  if (!EMAIL_REGEX.test(String(email).trim())) return 'Invalid Email Address';
+  if (!EMAIL_REGEX.test(String(email).trim().toLowerCase()))
+    return 'Invalid Email Address';
   return null;
 }
 
-
-// GET /api/students
-router.get('/', authorize('super_admin', 'admin', 'faculty'), async (req: AuthRequest, res: Response) => {
+// ── GET /api/students ──────────────────────────────────────────
+router.get('/', authorize('super_admin', 'admin', 'incharge', 'teacher'), async (req: AuthRequest, res: Response) => {
   try {
     const { search, course_id, batch_id, status, page = '1', limit = '20' } = req.query;
     const offset = (parseInt(page as string) - 1) * parseInt(limit as string);
@@ -42,8 +43,8 @@ router.get('/', authorize('super_admin', 'admin', 'faculty'), async (req: AuthRe
       q += ` AND (s.full_name ILIKE $${params.length} OR s.email ILIKE $${params.length} OR s.student_id ILIKE $${params.length} OR s.mobile ILIKE $${params.length})`;
     }
     if (course_id) { params.push(course_id); q += ` AND s.course_id=$${params.length}`; }
-    if (batch_id) { params.push(batch_id); q += ` AND s.batch_id=$${params.length}`; }
-    if (status) { params.push(status); q += ` AND s.status=$${params.length}`; }
+    if (batch_id)  { params.push(batch_id);  q += ` AND s.batch_id=$${params.length}`;  }
+    if (status)    { params.push(status);    q += ` AND s.status=$${params.length}`;    }
 
     const countResult = await query(`SELECT COUNT(*) FROM (${q}) AS t`, params);
     const total = parseInt(countResult.rows[0].count);
@@ -59,13 +60,13 @@ router.get('/', authorize('super_admin', 'admin', 'faculty'), async (req: AuthRe
   }
 });
 
-// GET /api/students/export
+// ── GET /api/students/export ──────────────────────────────────────────
 router.get('/export', authorize('super_admin', 'admin'), async (_req: AuthRequest, res: Response) => {
   try {
     const result = await query(
       `SELECT s.student_id, s.full_name, s.mobile, s.email, s.date_of_birth, s.gender,
-              s.address, s.parent_name, s.parent_mobile, c.course_name, b.batch_name,
-              s.admission_date, s.status
+              s.address, s.parent_name, s.parent_mobile, s.guardian_type, s.parent_present,
+              c.course_name, b.batch_name, s.admission_date, s.status
        FROM students s
        LEFT JOIN courses c ON c.id = s.course_id
        LEFT JOIN batches b ON b.id = s.batch_id
@@ -82,7 +83,7 @@ router.get('/export', authorize('super_admin', 'admin'), async (_req: AuthReques
   }
 });
 
-// GET /api/students/discontinued
+// ── GET /api/students/discontinued ──────────────────────────────────────
 router.get('/discontinued', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { search, page = '1', limit = '20' } = req.query;
@@ -109,11 +110,10 @@ router.get('/discontinued', authorize('super_admin', 'admin'), async (req: AuthR
   }
 });
 
-// GET /api/students/:id/discontinue-details  — fetch all info for confirmation popup
+// ── GET /api/students/:id/discontinue-details ───────────────────────────
 router.get('/:id/discontinue-details', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    // Student info
     const studentRes = await query(
       `SELECT s.*, c.course_name, c.fee_amount, b.batch_name
        FROM students s
@@ -127,52 +127,26 @@ router.get('/:id/discontinue-details', authorize('super_admin', 'admin'), async 
     }
     const student = studentRes.rows[0];
 
-    // Enrollments (certificates)
     const enrollmentsRes = await query(
       `SELECT e.*, c.course_name FROM enrollments e
        LEFT JOIN courses c ON c.id = e.course_id
        WHERE e.student_id=$1 ORDER BY e.enrolled_at DESC`, [id]
     );
 
-    // Payments
     const paymentsRes = await query(
       `SELECT p.*, pm.method_type FROM payments p
        LEFT JOIN payment_methods pm ON pm.id = p.payment_method_id
        WHERE p.student_id=$1 ORDER BY p.payment_date DESC`, [id]
     );
 
-    // Calculate dues using verified payments only
     const verifiedPayments = paymentsRes.rows.filter((p: any) => p.status === 'verified');
-    const totalPaid = verifiedPayments.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
-    const courseFee = parseFloat(student.fee_amount || '0');
+    const totalPaid  = verifiedPayments.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
+    const courseFee  = parseFloat(student.fee_amount || '0');
     const pendingDues = Math.max(0, courseFee - totalPaid);
-
-    // Fee categories: proportional split of existing course fee_amount (no new DB tables)
-    // Tuition 51.4%, Uniform 5.7%, Exam 8.6%, Hostel & Mess 34.3%
-    let paidPool = totalPaid;
-    const feeCategories = courseFee > 0 ? [
-      { name: 'Tuition Fee',       pct: 0.514 },
-      { name: 'Uniform Fee',       pct: 0.057 },
-      { name: 'Exam Fee',          pct: 0.086 },
-      { name: 'Hostel & Mess Fee', pct: 0.343 },
-    ].map(cat => {
-      const actual  = Math.round(courseFee * cat.pct);
-      const paid    = Math.min(paidPool, actual);
-      paidPool      = Math.max(0, paidPool - paid);
-      return { name: cat.name, actual, paid, remaining: Math.max(0, actual - paid) };
-    }) : [];
 
     res.json({
       success: true,
-      data: {
-        student,
-        enrollments: enrollmentsRes.rows,
-        payments: paymentsRes.rows,
-        totalPaid,
-        courseFee,
-        pendingDues,
-        feeCategories,
-      }
+      data: { student, enrollments: enrollmentsRes.rows, payments: paymentsRes.rows, totalPaid, courseFee, pendingDues },
     });
   } catch (err) {
     console.error(err);
@@ -180,33 +154,28 @@ router.get('/:id/discontinue-details', authorize('super_admin', 'admin'), async 
   }
 });
 
-// POST /api/students/:id/discontinue
+// ── POST /api/students/:id/discontinue ─────────────────────────────────
 router.post('/:id/discontinue', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { reason, force, disc_cert_10th, disc_cert_12th, disc_cert_diploma } = req.body;
-
-    // Check if student exists and is active
     const existing = await query('SELECT * FROM students WHERE id=$1', [req.params.id]);
     if (existing.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Student not found' });
       return;
     }
-    const student = existing.rows[0];
-    if (student.status === 'discontinued') {
+    if (existing.rows[0].status === 'discontinued') {
       res.status(400).json({ success: false, message: 'Student is already discontinued' });
       return;
     }
-
-    // Check pending dues unless force=true
     if (!force) {
       const paymentsRes = await query(
         `SELECT SUM(amount) as total_paid FROM payments WHERE student_id=$1 AND status='verified'`,
         [req.params.id]
       );
-      const courseRes = await query('SELECT fee_amount FROM courses WHERE id=$1', [student.course_id]);
+      const courseRes = await query('SELECT fee_amount FROM courses WHERE id=$1', [existing.rows[0].course_id]);
       if (courseRes.rows.length > 0) {
-        const totalPaid = parseFloat(paymentsRes.rows[0].total_paid || '0');
-        const courseFee = parseFloat(courseRes.rows[0].fee_amount || '0');
+        const totalPaid  = parseFloat(paymentsRes.rows[0].total_paid || '0');
+        const courseFee  = parseFloat(courseRes.rows[0].fee_amount || '0');
         const pendingDues = courseFee - totalPaid;
         if (pendingDues > 0) {
           res.status(422).json({
@@ -218,13 +187,16 @@ router.post('/:id/discontinue', authorize('super_admin', 'admin'), async (req: A
         }
       }
     }
-
     const result = await query(
       `UPDATE students
        SET status='discontinued', discontinued_at=NOW(), discontinued_reason=$1,
            disc_cert_10th=$2, disc_cert_12th=$3, disc_cert_diploma=$4
        WHERE id=$5 RETURNING *`,
-      [reason || null, disc_cert_10th === true || disc_cert_10th === 'true', disc_cert_12th === true || disc_cert_12th === 'true', disc_cert_diploma === true || disc_cert_diploma === 'true', req.params.id]
+      [reason || null,
+       disc_cert_10th === true || disc_cert_10th === 'true',
+       disc_cert_12th === true || disc_cert_12th === 'true',
+       disc_cert_diploma === true || disc_cert_diploma === 'true',
+       req.params.id]
     );
     res.json({ success: true, data: result.rows[0], message: 'Student discontinued successfully' });
   } catch (err) {
@@ -233,7 +205,7 @@ router.post('/:id/discontinue', authorize('super_admin', 'admin'), async (req: A
   }
 });
 
-// POST /api/students/:id/restore
+// ── POST /api/students/:id/restore ─────────────────────────────────────
 router.post('/:id/restore', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
     const existing = await query('SELECT * FROM students WHERE id=$1', [req.params.id]);
@@ -256,11 +228,11 @@ router.post('/:id/restore', authorize('super_admin', 'admin'), async (req: AuthR
   }
 });
 
-// GET /api/students/:id
-router.get('/:id', authorize('super_admin', 'admin', 'faculty', 'student'), async (req: AuthRequest, res: Response) => {
+// ── GET /api/students/:id ──────────────────────────────────────────────
+router.get('/:id', authorize('super_admin', 'admin', 'incharge', 'teacher', 'student'), async (req: AuthRequest, res: Response) => {
   try {
     const result = await query(
-      `SELECT s.*, c.course_name, b.batch_name
+      `SELECT s.*, c.course_name, c.fee_amount AS course_fee_amount, b.batch_name
        FROM students s
        LEFT JOIN courses c ON c.id = s.course_id
        LEFT JOIN batches b ON b.id = s.batch_id
@@ -277,66 +249,198 @@ router.get('/:id', authorize('super_admin', 'admin', 'faculty', 'student'), asyn
   }
 });
 
-// POST /api/students
+// ── POST /api/students ─────────────────────────────────────────────────
+// Creates student using a DB transaction. Does NOT auto-create a users login.
+// Returns HTTP 409 DUPLICATE_EMAIL if email already exists in students or users.
 router.post('/', authorize('super_admin', 'admin'), uploadPhoto.single('photo'), async (req: AuthRequest, res: Response) => {
+  const client = await pool.connect();
   try {
     const {
       full_name, mobile, email, date_of_birth, gender, address,
-      parent_name, parent_mobile, course_id, batch_id, admission_date, status,
-      cert_10th_collected, cert_12th_collected, cert_diploma_collected
+      parent_name, parent_mobile, parent_present, guardian_type,
+      course_id, batch_id, admission_date, status,
+      cert_10th_collected, cert_12th_collected, cert_diploma_collected,
+      initial_payment, payment_method, payment_type_label,
+      internship_monthly, internship_months,
     } = req.body;
 
+    // ── 1. Validate inputs ──
     const validErr = validateStudentInput(req.body);
-    if (validErr) { res.status(400).json({ success: false, message: validErr }); return; }
-
-    const emailNorm = String(email).trim().toLowerCase();
-    const exists = await query('SELECT id FROM students WHERE LOWER(email)=$1', [emailNorm]);
-    if (exists.rows.length > 0) {
-      res.status(409).json({ success: false, message: 'Email already exists' });
+    if (validErr) {
+      res.status(400).json({ success: false, message: validErr });
       return;
     }
-    const student_id = await generateStudentId();
-    const photo_url = req.file ? `/uploads/photos/${req.file.filename}` : null;
 
-    const cert10 = cert_10th_collected === 'true' || cert_10th_collected === true;
-    const cert12 = cert_12th_collected === 'true' || cert_12th_collected === true;
+    const emailNorm = String(email).trim().toLowerCase();
+
+    // ── 2. Duplicate email check (students + users) ──
+    const dupStudent = await query('SELECT id FROM students WHERE LOWER(email)=$1', [emailNorm]);
+    if (dupStudent.rows.length > 0) {
+      res.status(409).json({
+        success: false,
+        error: 'DUPLICATE_EMAIL',
+        message: 'A student with this email already exists. Please use a different email address.',
+      });
+      return;
+    }
+    const dupUser = await query('SELECT id FROM users WHERE LOWER(email)=$1', [emailNorm]);
+    if (dupUser.rows.length > 0) {
+      res.status(409).json({
+        success: false,
+        error: 'DUPLICATE_EMAIL',
+        message: 'This email is already registered as a system user. Please use a different email address.',
+      });
+      return;
+    }
+
+    // ── 3. Begin transaction ──
+    await client.query('BEGIN');
+
+    const student_id = await generateStudentId();
+    const photo_url  = req.file ? `/uploads/photos/${req.file.filename}` : null;
+
+    const cert10  = cert_10th_collected  === 'true' || cert_10th_collected  === true;
+    const cert12  = cert_12th_collected  === 'true' || cert_12th_collected  === true;
     const certDip = cert_diploma_collected === 'true' || cert_diploma_collected === true;
 
-    // Create user account for student
-    const hash = await hashPassword(`Student@${String(mobile).trim().slice(-4)}`);
-    const userResult = await query(
-      'INSERT INTO users (full_name, email, password_hash, role) VALUES ($1,$2,$3,\'student\') RETURNING id',
-      [String(full_name).trim(), emailNorm, hash]
+    // ── 4. Create student record ──
+    const studentResult = await client.query(
+      `INSERT INTO students (
+         student_id, full_name, mobile, email, date_of_birth, gender,
+         address, parent_name, parent_mobile, parent_present, guardian_type,
+         photo_url, course_id, batch_id, admission_date, status,
+         cert_10th_collected, cert_12th_collected, cert_diploma_collected
+       ) VALUES (
+         $1,  $2,  $3,  $4,  $5,  $6,
+         $7,  $8,  $9,  $10, $11,
+         $12, $13, $14, $15, $16,
+         $17, $18, $19
+       ) RETURNING *`,
+      [
+        student_id,
+        String(full_name).trim(),
+        String(mobile).trim(),
+        emailNorm,
+        date_of_birth || null,
+        gender || null,
+        address || null,
+        parent_name || null,
+        parent_mobile || null,
+        parent_present === 'true' || parent_present === true,
+        guardian_type || null,
+        photo_url,
+        course_id || null,
+        batch_id || null,
+        admission_date || new Date().toISOString().split('T')[0],
+        status || 'active',
+        cert10,
+        cert12,
+        certDip,
+      ]
     );
-    const userId = userResult.rows[0].id;
+    const newStudent = studentResult.rows[0];
 
-    const result = await query(
-      `INSERT INTO students (student_id, user_id, full_name, mobile, email, date_of_birth, gender,
-        address, parent_name, parent_mobile, photo_url, course_id, batch_id, admission_date, status,
-        cert_10th_collected, cert_12th_collected, cert_diploma_collected)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
-       RETURNING *`,
-      [student_id, userId, String(full_name).trim(), String(mobile).trim(), emailNorm,
-       date_of_birth || null, gender || null,
-       address || null, parent_name || null, parent_mobile || null, photo_url,
-       course_id || null, batch_id || null,
-       admission_date || new Date().toISOString().split('T')[0], status || 'active',
-       cert10, cert12, certDip]
-    );
-    res.status(201).json({ success: true, data: result.rows[0] });
-  } catch (err) {
+    // ── 5. Auto-enrollment if course selected ──
+    let enrollmentId: number | null = null;
+    if (course_id) {
+      // Get the actual course fee
+      const courseResult = await client.query(
+        'SELECT fee_amount, is_free FROM courses WHERE id=$1', [course_id]
+      );
+      const courseFeeAmount = courseResult.rows.length > 0
+        ? parseFloat(courseResult.rows[0].fee_amount || '0')
+        : 0;
+
+      const enrollResult = await client.query(
+        `INSERT INTO enrollments (student_id, course_id, batch_id, course_fee, status, approved_by, approved_at)
+         VALUES ($1, $2, $3, $4, 'approved', $5, NOW())
+         ON CONFLICT (student_id, course_id) DO NOTHING
+         RETURNING id`,
+        [newStudent.id, course_id, batch_id || null, courseFeeAmount, req.user!.id]
+      );
+      if (enrollResult.rows.length > 0) {
+        enrollmentId = enrollResult.rows[0].id;
+        // Sync course/batch to student
+        await client.query(
+          `UPDATE students SET course_id=$1, batch_id=$2,
+             admission_date = COALESCE($3::date, admission_date, CURRENT_DATE)
+           WHERE id=$4`,
+          [course_id, batch_id || null, admission_date || null, newStudent.id]
+        );
+      }
+    }
+
+    // ── 6. Record initial payment if provided ──
+    const initPayAmt = Number(initial_payment) || 0;
+    if (initPayAmt > 0 && enrollmentId) {
+      // Resolve payment_method to a payment_method_id if provided
+      let paymentMethodId: number | null = null;
+      if (payment_method) {
+        const pmResult = await client.query(
+          'SELECT id FROM payment_methods WHERE method_type ILIKE $1 AND is_enabled=true LIMIT 1',
+          [payment_method]
+        );
+        if (pmResult.rows.length > 0) {
+          paymentMethodId = pmResult.rows[0].id;
+        }
+      }
+
+      await client.query(
+        `INSERT INTO payments (student_id, enrollment_id, payment_method_id, amount,
+           payment_date, payment_type, notes, status, verified_by, verified_at)
+         VALUES ($1, $2, $3, $4, $5, 'initial', $6, 'verified', $7, NOW())`,
+        [
+          newStudent.id,
+          enrollmentId,
+          paymentMethodId,
+          initPayAmt,
+          admission_date || new Date().toISOString().split('T')[0],
+          payment_type_label || 'Initial payment at admission',
+          req.user!.id,
+        ]
+      );
+    }
+
+    // ── 7. Record internship plan as notes (NOT as payment) ──
+    const monthlyAmt = Number(internship_monthly) || 0;
+    const months     = Number(internship_months) || 0;
+    if (monthlyAmt > 0 && months > 0 && enrollmentId) {
+      const planNote = `Internship Plan: ₹${monthlyAmt.toLocaleString('en-IN')} × ${months} months = ₹${(monthlyAmt * months).toLocaleString('en-IN')} (PLAN ONLY — not actual payment)`;
+      await client.query(
+        `UPDATE enrollments SET notes = COALESCE(notes || E'\n', '') || $1 WHERE id = $2`,
+        [planNote, enrollmentId]
+      );
+    }
+
+    // ── 8. Commit ──
+    await client.query('COMMIT');
+
+    res.status(201).json({ success: true, data: newStudent });
+  } catch (err: any) {
+    await client.query('ROLLBACK');
     console.error('POST /students error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
+    if (err.code === '23505') {
+      // Unique constraint violation — should have been caught above, but handle defensively
+      res.status(409).json({
+        success: false,
+        error: 'DUPLICATE_EMAIL',
+        message: 'A user or student with this email already exists. Please use a different email address.',
+      });
+    } else {
+      res.status(500).json({ success: false, message: 'Server error creating student' });
+    }
+  } finally {
+    client.release();
   }
 });
 
-// PUT /api/students/:id
+// ── PUT /api/students/:id ──────────────────────────────────────────────
 router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'), async (req: AuthRequest, res: Response) => {
   try {
     const {
       full_name, mobile, email, date_of_birth, gender, address,
-      parent_name, parent_mobile, status,
-      cert_10th_collected, cert_12th_collected, cert_diploma_collected
+      parent_name, parent_mobile, guardian_type, parent_present, status,
+      cert_10th_collected, cert_12th_collected, cert_diploma_collected,
     } = req.body;
 
     const validErr = validateStudentInput(req.body);
@@ -348,10 +452,15 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
       return;
     }
     const emailNorm = String(email).trim().toLowerCase();
-    // Check duplicate email (excluding self)
-    const dupEmail = await query('SELECT id FROM students WHERE LOWER(email)=$1 AND id!=$2', [emailNorm, req.params.id]);
-    if (dupEmail.rows.length > 0) {
-      res.status(409).json({ success: false, message: 'Email already exists' });
+
+    // Check duplicate email (excluding self) in students
+    const dupStudent = await query('SELECT id FROM students WHERE LOWER(email)=$1 AND id!=$2', [emailNorm, req.params.id]);
+    if (dupStudent.rows.length > 0) {
+      res.status(409).json({
+        success: false,
+        error: 'DUPLICATE_EMAIL',
+        message: 'This email is already used by another student.',
+      });
       return;
     }
 
@@ -359,20 +468,28 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
       ? `/uploads/photos/${req.file.filename}`
       : existing.rows[0].photo_url;
 
-    const cert10 = cert_10th_collected === 'true' || cert_10th_collected === true;
-    const cert12 = cert_12th_collected === 'true' || cert_12th_collected === true;
+    const cert10  = cert_10th_collected  === 'true' || cert_10th_collected  === true;
+    const cert12  = cert_12th_collected  === 'true' || cert_12th_collected  === true;
     const certDip = cert_diploma_collected === 'true' || cert_diploma_collected === true;
 
-    // course_id, batch_id, admission_date are managed by Enrollment — preserve existing values
     const result = await query(
-      `UPDATE students SET full_name=$1, mobile=$2, email=$3, date_of_birth=$4, gender=$5,
-        address=$6, parent_name=$7, parent_mobile=$8, photo_url=$9, status=$10,
-        cert_10th_collected=$11, cert_12th_collected=$12, cert_diploma_collected=$13
-       WHERE id=$14 RETURNING *`,
-      [String(full_name).trim(), String(mobile).trim(), emailNorm, date_of_birth || null, gender || null,
-       address || null, parent_name || null, parent_mobile || null, photo_url, status || 'active',
-       cert10, cert12, certDip,
-       req.params.id]
+      `UPDATE students
+       SET full_name=$1, mobile=$2, email=$3, date_of_birth=$4, gender=$5,
+           address=$6, parent_name=$7, parent_mobile=$8, guardian_type=$9,
+           parent_present=$10, photo_url=$11, status=$12,
+           cert_10th_collected=$13, cert_12th_collected=$14, cert_diploma_collected=$15
+       WHERE id=$16 RETURNING *`,
+      [
+        String(full_name).trim(), String(mobile).trim(), emailNorm,
+        date_of_birth || null, gender || null,
+        address || null, parent_name || null, parent_mobile || null,
+        guardian_type || null,
+        parent_present === 'true' || parent_present === true,
+        photo_url,
+        status || 'active',
+        cert10, cert12, certDip,
+        req.params.id,
+      ]
     );
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
@@ -381,12 +498,10 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
   }
 });
 
-
-
-// DELETE /api/students/:id — hard delete, only allowed for discontinued students
+// ── DELETE /api/students/:id ───────────────────────────────────────────
 router.delete('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
-    const existing = await query('SELECT id, status, full_name FROM students WHERE id=$1', [req.params.id]);
+    const existing = await query('SELECT id, status, full_name, user_id FROM students WHERE id=$1', [req.params.id]);
     if (existing.rows.length === 0) {
       res.status(404).json({ success: false, message: 'Student not found' });
       return;
@@ -395,9 +510,30 @@ router.delete('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest
       res.status(400).json({ success: false, message: 'Only discontinued students can be permanently deleted' });
       return;
     }
-    // Hard delete — cascades to payments, attendance, enrollments via FK
     await query('DELETE FROM students WHERE id=$1', [req.params.id]);
     res.json({ success: true, message: `Student "${existing.rows[0].full_name}" permanently deleted` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── POST /api/students/:id/cert ────────────────────────────────────────
+router.post('/:id/cert', authorize('super_admin', 'admin'), uploadCertificate.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    const { cert_type } = req.body;
+    if (!req.file) { res.status(400).json({ success: false, message: 'No file uploaded' }); return; }
+    const allowed = ['10th', '12th', 'diploma'];
+    if (!allowed.includes(cert_type)) { res.status(400).json({ success: false, message: 'Invalid cert_type' }); return; }
+    const colMap: Record<string, string> = { '10th': 'cert_10th_url', '12th': 'cert_12th_url', 'diploma': 'cert_diploma_url' };
+    const col = colMap[cert_type];
+    const url = `/uploads/certificates/${req.file.filename}`;
+    const result = await query(
+      `UPDATE students SET ${col}=$1 WHERE id=$2 RETURNING id, cert_10th_url, cert_12th_url, cert_diploma_url`,
+      [url, req.params.id]
+    );
+    if (result.rows.length === 0) { res.status(404).json({ success: false, message: 'Student not found' }); return; }
+    res.json({ success: true, data: result.rows[0], url });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });

@@ -6,7 +6,7 @@ const router = Router();
 router.use(authenticate);
 
 // POST /api/attendance - Mark attendance for multiple students
-router.post('/', authorize('super_admin', 'admin', 'faculty'), async (req: AuthRequest, res: Response) => {
+router.post('/', authorize('super_admin', 'admin', 'incharge', 'teacher'), async (req: AuthRequest, res: Response) => {
   try {
     const { batch_id, attendance_date, records } = req.body;
     if (!attendance_date || !records || !Array.isArray(records)) {
@@ -31,7 +31,7 @@ router.post('/', authorize('super_admin', 'admin', 'faculty'), async (req: AuthR
 });
 
 // GET /api/attendance
-router.get('/', authorize('super_admin', 'admin', 'faculty', 'student'), async (req: AuthRequest, res: Response) => {
+router.get('/', authorize('super_admin', 'admin', 'incharge', 'teacher', 'student'), async (req: AuthRequest, res: Response) => {
   try {
     const { student_id, batch_id, start_date, end_date, attendance_date } = req.query;
     let q = `SELECT a.*, s.full_name as student_name, s.student_id as student_code,
@@ -52,7 +52,7 @@ router.get('/', authorize('super_admin', 'admin', 'faculty', 'student'), async (
 });
 
 // GET /api/attendance/report/student/:studentId
-router.get('/report/student/:studentId', authorize('super_admin', 'admin', 'faculty', 'student'), async (req: AuthRequest, res: Response) => {
+router.get('/report/student/:studentId', authorize('super_admin', 'admin', 'incharge', 'teacher', 'student'), async (req: AuthRequest, res: Response) => {
   try {
     const { month, year } = req.query;
     let q = `SELECT a.*, s.full_name as student_name FROM attendance a
@@ -74,7 +74,7 @@ router.get('/report/student/:studentId', authorize('super_admin', 'admin', 'facu
 });
 
 // GET /api/attendance/report/monthly
-router.get('/report/monthly', authorize('super_admin', 'admin', 'faculty'), async (req: AuthRequest, res: Response) => {
+router.get('/report/monthly', authorize('super_admin', 'admin', 'incharge', 'teacher'), async (req: AuthRequest, res: Response) => {
   try {
     const { batch_id, month, year } = req.query;
     if (!month || !year) { res.status(400).json({ success: false, message: 'month and year required' }); return; }
@@ -96,7 +96,7 @@ router.get('/report/monthly', authorize('super_admin', 'admin', 'faculty'), asyn
 });
 
 // GET /api/attendance/report/all — aggregate totals for all students, optional date range
-router.get('/report/all', authorize('super_admin', 'admin', 'faculty'), async (req: AuthRequest, res: Response) => {
+router.get('/report/all', authorize('super_admin', 'admin', 'incharge', 'teacher'), async (req: AuthRequest, res: Response) => {
   try {
     const { start_date, end_date, batch_id } = req.query;
     let q = `SELECT
@@ -134,7 +134,7 @@ router.get('/report/all', authorize('super_admin', 'admin', 'faculty'), async (r
 });
 
 // GET /api/attendance/report/batch/:batchId — per-batch daily summary
-router.get('/report/batch/:batchId', authorize('super_admin', 'admin', 'faculty'), async (req: AuthRequest, res: Response) => {
+router.get('/report/batch/:batchId', authorize('super_admin', 'admin', 'incharge', 'teacher'), async (req: AuthRequest, res: Response) => {
   try {
     const { date } = req.query;
     const targetDate = date || new Date().toISOString().split('T')[0];
