@@ -165,9 +165,9 @@ const AttendancePage: React.FC = () => {
                 </div>
                 <div className="attendance-grid">
                   {students.map(s => (
-                    <div key={s.id} className="attendance-item attendance-item-vertical">
-                      <div className="student-avatar" style={{ width: 44, height: 44, fontSize: 16, margin: '0 auto 8px' }}>{s.full_name.charAt(0)}</div>
-                      <div style={{ textAlign: 'center', marginBottom: 10 }}>
+                    <div key={s.id} className="attendance-item">
+                      <div className="student-avatar" style={{ width: 32, height: 32, fontSize: 12 }}>{s.full_name.charAt(0)}</div>
+                      <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600, fontSize: 13 }}>{s.full_name}</div>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.student_id}</div>
                       </div>
@@ -175,7 +175,7 @@ const AttendancePage: React.FC = () => {
                         className="attendance-select"
                         value={attendance[s.id] || 'present'}
                         onChange={e => setAttendance(a => ({ ...a, [s.id]: e.target.value }))}
-                        style={{ color: statusColors[attendance[s.id] || 'present'], width: '100%' }}
+                        style={{ color: statusColors[attendance[s.id] || 'present'] }}
                       >
                         <option value="present">Present</option>
                         <option value="absent">Absent</option>
@@ -185,7 +185,7 @@ const AttendancePage: React.FC = () => {
                     </div>
                   ))}
                 </div>
-                <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
+                <div style={{ marginTop: 20 }}>
                   <button className="btn btn-primary" onClick={handleMark} disabled={loading}><FiCheck /> {loading ? 'Saving...' : 'Save Attendance'}</button>
                 </div>
               </>

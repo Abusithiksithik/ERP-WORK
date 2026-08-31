@@ -131,7 +131,7 @@ BEGIN
       course_id, batch_id, admission_date, status
     ) VALUES (
       'STU-SAMPLE-05', 'Nisha Devi', '9876543214', 'nisha.sample05@example.com', 'Female',
-      free_course_id, free_batch_id, CURRENT_DATE, 'active'
+      free_course_id, free_batch_id, CURRENT_DATE, 'inactive'
     ) RETURNING id INTO s5_id;
 
     INSERT INTO enrollments (student_id, course_id, batch_id, course_fee, status, approved_by, approved_at)
@@ -141,6 +141,10 @@ BEGIN
     UPDATE students SET course_id = free_course_id, batch_id = free_batch_id WHERE id = s5_id;
     -- No payment — free course
   END IF;
+
+  -- ── Fix status for already-seeded students ──────────────────────────
+  -- Nisha Devi → inactive (for testing inactive filter)
+  UPDATE students SET status = 'inactive' WHERE email = 'nisha.sample05@example.com';
 
 END $$;
 

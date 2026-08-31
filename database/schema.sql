@@ -426,3 +426,11 @@ BEGIN
     END LOOP;
 END;
 $$;
+
+-- ============================================================
+-- CONSENT COLUMNS (idempotent migration)
+-- ============================================================
+ALTER TABLE students ADD COLUMN IF NOT EXISTS consent_given BOOLEAN DEFAULT false;
+ALTER TABLE students ADD COLUMN IF NOT EXISTS consent_image_url VARCHAR(255);
+ALTER TABLE students ADD COLUMN IF NOT EXISTS consent_pdf_url VARCHAR(255);
+ALTER TABLE students ADD COLUMN IF NOT EXISTS consent_video_url VARCHAR(255);

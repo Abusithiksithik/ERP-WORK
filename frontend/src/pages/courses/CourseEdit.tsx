@@ -82,7 +82,7 @@ const CourseEdit: React.FC = () => {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Edit Course</h1>
+          <h1 className="page-title">Edit Sub-Course</h1>
           <p className="page-subtitle">{form.course_name}</p>
         </div>
         <button className="btn btn-secondary" onClick={() => navigate('/courses')}>← Back</button>
@@ -91,20 +91,20 @@ const CourseEdit: React.FC = () => {
       <div className="card" style={{ maxWidth: 720 }}>
         <form onSubmit={handleSubmit}>
 
-          {/* Category */}
+          {/* Master Course */}
           <div className="form-group">
-            <label className="form-label">Category</label>
+            <label className="form-label">Master Course</label>
             <select className="form-control" value={form.category_id} onChange={set('category_id')}>
-              <option value="">— No Category —</option>
-              {categories.map(c => (
+              <option value="">— Select Master Course —</option>
+              {categories.filter(c => c.status === 'active').map(c => (
                 <option key={c.id} value={c.id}>{c.category_name}</option>
               ))}
             </select>
           </div>
 
-          {/* Course Name */}
+          {/* Sub-Course Name */}
           <div className="form-group">
-            <label className="form-label">Course Name *</label>
+            <label className="form-label">Sub-Course Name *</label>
             <input
               className="form-control"
               value={form.course_name}

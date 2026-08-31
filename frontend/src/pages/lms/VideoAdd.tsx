@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { FiUpload, FiVideo, FiImage, FiArrowLeft, FiCheckCircle } from 'react-icons/fi';
 import api from '../../api/axios';
-import { Course, LmsModule } from '../../types';
+import { Course } from '../../types';
 
 const VideoAdd: React.FC = () => {
   const navigate = useNavigate();
@@ -17,58 +17,30 @@ const VideoAdd: React.FC = () => {
 
   const [loading, setLoading] = useState(false);
   const [coursesLoading, setCoursesLoading] = useState(true);
-  const [modulesLoading, setModulesLoading] = useState(false);
   const [courses, setCourses] = useState<Course[]>([]);
-  const [modules, setModules] = useState<LmsModule[]>([]);
   const [videoName, setVideoName] = useState('');
   const [videoSize, setVideoSize] = useState('');
   const [thumbPreview, setThumbPreview] = useState<string | null>(null);
   const [form, setForm] = useState({
     course_id: presetCourseId,
-    module_id: '',
     title: '',
     description: '',
     is_free: false,
     order_number: '1',
   });
 
-  // ✅ Load courses on mount
+  // Load courses on mount
   useEffect(() => {
     setCoursesLoading(true);
     api.get('/courses')
-      .then(r => {
-        setCourses(r.data.data || []);
-      })
+      .then(r => setCourses(r.data.data || []))
       .catch(() => toast.error('Failed to load courses'))
       .finally(() => setCoursesLoading(false));
   }, []);
 
-  // ✅ Load modules when presetCourseId is set from URL
-  useEffect(() => {
-    if (presetCourseId) {
-      setModulesLoading(true);
-      api.get('/modules', { params: { course_id: presetCourseId } })
-        .then(r => setModules(r.data.data || []))
-        .catch(() => {})
-        .finally(() => setModulesLoading(false));
-    }
-  }, [presetCourseId]);
-
-  // ✅ FIXED: Properly load modules when course changes
-  const handleCourseChange = useCallback(async (courseId: string) => {
-    setForm(f => ({ ...f, course_id: courseId, module_id: '' }));
-    setModules([]);
-    if (!courseId) return;
-    setModulesLoading(true);
-    try {
-      const r = await api.get('/modules', { params: { course_id: courseId } });
-      setModules(r.data.data || []);
-    } catch {
-      toast.error('Failed to load modules for this course');
-    } finally {
-      setModulesLoading(false);
-    }
-  }, []);
+  const handleCourseChange = (courseId: string) => {
+    setForm(f => ({ ...f, course_id: courseId }));
+  };
 
   const handleVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -91,7 +63,6 @@ const VideoAdd: React.FC = () => {
       fd.append('video', videoRef.current.files[0]);
       if (thumbRef.current?.files?.[0]) fd.append('thumbnail', thumbRef.current.files[0]);
       fd.append('course_id', form.course_id);
-      if (form.module_id) fd.append('module_id', form.module_id);
       fd.append('title', form.title);
       fd.append('description', form.description);
       fd.append('is_free', String(form.is_free));
@@ -154,62 +125,30 @@ const VideoAdd: React.FC = () => {
       <div className="card">
         <form onSubmit={handleSubmit}>
 
-          {/* ── Course & Module ── */}
-          <h3 className="section-heading">📚 Course & Module</h3>
-          <div className="form-grid">
-            <div className="form-group">
-              <label className="form-label">
-                Course *
-                {coursesLoading && <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: 8 }}>Loading courses...</span>}
-              </label>
-              {/* ✅ FIXED: onChange properly calls handleCourseChange */}
-              <select
-                className="form-control"
-                value={form.course_id}
-                onChange={e => handleCourseChange(e.target.value)}
-                required
-                disabled={coursesLoading}
-              >
-                <option value="">{coursesLoading ? 'Loading courses...' : courses.length === 0 ? 'No courses found — create a course first' : 'Select Course'}</option>
-                {courses.map(c => (
-                  <option key={c.id} value={c.id}>{c.course_name}</option>
-                ))}
-              </select>
-              {!coursesLoading && courses.length === 0 && (
-                <p style={{ fontSize: 12, color: 'var(--red)', marginTop: 4 }}>
-                  No courses available. <Link to="/courses/add" style={{ color: 'var(--accent)' }}>Create a course first →</Link>
-                </p>
-              )}
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">
-                Module
-                {modulesLoading && <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: 8 }}>Loading...</span>}
-                {!modulesLoading && form.course_id && modules.length === 0 && (
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 8 }}>(No modules in this course)</span>
-                )}
-                {!modulesLoading && modules.length > 0 && (
-                  <span style={{ fontSize: 11, color: 'var(--teal)', marginLeft: 8 }}>{modules.length} modules</span>
-                )}
-              </label>
-              <select
-                className="form-control"
-                value={form.module_id}
-                onChange={set('module_id')}
-                disabled={!form.course_id || modulesLoading}
-              >
-                <option value="">
-                  {!form.course_id ? '— Select a course first —' : modulesLoading ? 'Loading modules...' : 'No Module (General Video)'}
-                </option>
-                {modules.map(m => <option key={m.id} value={m.id}>{m.module_name}</option>)}
-              </select>
-              {form.course_id && modules.length === 0 && !modulesLoading && (
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                  <Link to="/modules" style={{ color: 'var(--accent)' }}>Create modules →</Link> to organise videos
-                </p>
-              )}
-            </div>
+          {/* ── Course ── */}
+          <h3 className="section-heading">📚 Course</h3>
+          <div className="form-group">
+            <label className="form-label">
+              Course *
+              {coursesLoading && <span style={{ fontSize: 11, color: 'var(--accent)', marginLeft: 8 }}>Loading courses...</span>}
+            </label>
+            <select
+              className="form-control"
+              value={form.course_id}
+              onChange={e => handleCourseChange(e.target.value)}
+              required
+              disabled={coursesLoading}
+            >
+              <option value="">{coursesLoading ? 'Loading courses...' : courses.length === 0 ? 'No courses found — create a course first' : 'Select Course'}</option>
+              {courses.map(c => (
+                <option key={c.id} value={c.id}>{c.course_name}</option>
+              ))}
+            </select>
+            {!coursesLoading && courses.length === 0 && (
+              <p style={{ fontSize: 12, color: 'var(--red)', marginTop: 4 }}>
+                No courses available. <Link to="/courses/add" style={{ color: 'var(--accent)' }}>Create a course first →</Link>
+              </p>
+            )}
           </div>
 
           {/* ── Video Details ── */}

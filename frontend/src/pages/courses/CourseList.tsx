@@ -58,8 +58,8 @@ const CourseList: React.FC = () => {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Courses</h1>
-          <p className="page-subtitle">{courses.length} course{courses.length !== 1 ? 's' : ''}{filterCategory ? ' in selected category' : ' total'}</p>
+          <h1 className="page-title">Sub-Courses</h1>
+          <p className="page-subtitle">{courses.length} sub-course{courses.length !== 1 ? 's' : ''}{filterCategory ? ' in selected master course' : ' total'}</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-secondary btn-sm" onClick={fetchCourses} title="Refresh"><FiRefreshCw /></button>
@@ -67,20 +67,20 @@ const CourseList: React.FC = () => {
         </div>
       </div>
 
-      {/* Category filter */}
+      {/* Master Course filter */}
       {categories.length > 0 && (
         <div className="card" style={{ marginBottom: 16, padding: '14px 24px' }}>
           <div className="search-bar" style={{ marginBottom: 0 }}>
             <div style={{ flex: 1 }}>
-              <label className="form-label" style={{ marginBottom: 6 }}>Filter by Category</label>
+              <label className="form-label" style={{ marginBottom: 6 }}>Filter by Master Course</label>
               <select
                 className="form-control"
                 value={filterCategory}
                 onChange={e => setFilterCategory(e.target.value)}
                 style={{ maxWidth: 320 }}
               >
-                <option value="">All Categories</option>
-                {categories.map(c => (
+                <option value="">All Master Courses</option>
+                {categories.filter(c => c.status === 'active').map(c => (
                   <option key={c.id} value={c.id}>{c.category_name}</option>
                 ))}
               </select>
@@ -114,8 +114,8 @@ const CourseList: React.FC = () => {
             <table>
               <thead>
                 <tr>
-                  <th>Course Name</th>
-                  <th>Category</th>
+                  <th>Sub-Course Name</th>
+                  <th>Master Course</th>
                   <th>Duration</th>
                   <th>Fee</th>
                   <th>Students</th>

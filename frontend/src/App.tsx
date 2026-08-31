@@ -19,6 +19,11 @@ import EnrollmentList from './pages/enrollment/EnrollmentList';
 import AttendancePage from './pages/attendance/AttendancePage';
 import ProfilePage from './pages/profile/ProfilePage';
 import UserList from './pages/profile/UserList';
+import CourseList from './pages/courses/CourseList';
+import CourseAdd from './pages/courses/CourseAdd';
+import CourseEdit from './pages/courses/CourseEdit';
+import BatchList from './pages/batches/BatchList';
+import HostelList from './pages/hostel/HostelList';
 
 const ADMIN_ROLES   = ['super_admin', 'admin'];
 const ADMIN_INCHARGE = ['super_admin', 'admin', 'incharge'];
@@ -32,8 +37,11 @@ function App() {
 
       <Route element={<PrivateRoute />}>
         <Route element={<Layout />}>
+          {/* Root redirect to Students */}
+          <Route path="/" element={<Navigate to="/students" replace />} />
+
           {/* Dashboard — all roles */}
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/dashboard" element={<Dashboard />} />
 
           {/* Students — Admin (full CRUD), Incharge (view), Teacher (view) */}
           <Route element={<PrivateRoute allowedRoles={ALL_ROLES} />}>
@@ -79,6 +87,23 @@ function App() {
             <Route path="/payments" element={<PaymentList />} />
           </Route>
 
+          {/* Courses — Admin only (Settings section) */}
+          <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
+            <Route path="/courses" element={<CourseList />} />
+            <Route path="/courses/add" element={<CourseAdd />} />
+            <Route path="/courses/:id/edit" element={<CourseEdit />} />
+          </Route>
+
+          {/* Batches — Admin only (Settings section) */}
+          <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
+            <Route path="/batches" element={<BatchList />} />
+          </Route>
+
+          {/* Hostel — Admin only */}
+          <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
+            <Route path="/hostel" element={<HostelList />} />
+          </Route>
+
           {/* Users — Admin only */}
           <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
             <Route path="/users" element={<UserList />} />
@@ -89,7 +114,7 @@ function App() {
         </Route>
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/students" replace />} />
     </Routes>
   );
 }

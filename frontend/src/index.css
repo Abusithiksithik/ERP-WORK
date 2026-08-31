@@ -472,8 +472,9 @@ tr:hover td { background: rgba(99,102,241,0.05); }
 .section-heading { font-size: 16px; font-weight: 700; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border-light); color: var(--text-primary); }
 
 /* ── Attendance Grid ── */
-.attendance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.attendance-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
 .attendance-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(15,23,42,0.4); border-radius: var(--radius-sm); border: 1px solid var(--border-light); }
+.attendance-item-vertical { flex-direction: column; align-items: stretch; gap: 0; padding: 16px 12px; }
 .attendance-select { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); font-size: 12px; }
 
 /* ── Responsive ── */
@@ -780,3 +781,86 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
   padding: 5px 0; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,0.04);
 }
 .fee-preview-row:last-child { border-bottom: none; font-weight: 700; }
+
+/* ── Date Inputs: White Calendar Icon + DD/MM/YYYY ── */
+input[type="date"].form-control,
+input[type="date"] {
+  color-scheme: dark;          /* makes the calendar icon white in Chromium */
+  cursor: pointer;
+  position: relative;
+}
+/* Chromium/Safari: force the calendar icon to be clearly visible */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(2.5) !important;  /* force white icon */
+  cursor: pointer;
+  opacity: 1 !important;
+  padding: 4px;
+  border-radius: 4px;
+  width: 18px;
+  height: 18px;
+  display: inline-block !important;
+  visibility: visible !important;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1 !important;
+  background: rgba(99,102,241,0.25);
+  border-radius: 4px;
+}
+/* Firefox */
+input[type="date"]::-moz-calendar-picker-indicator {
+  filter: invert(1) brightness(2);
+  cursor: pointer;
+}
+/* Date input wrapper that shows DD/MM/YYYY format hint */
+.date-field-wrap { position: relative; }
+.date-field-wrap input[type="date"] {
+  padding-right: 10px; /* give room for icon */
+}
+.date-field-wrap::after {
+  content: attr(data-format);
+  position: absolute;
+  right: 40px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: var(--text-muted);
+  pointer-events: none;
+  letter-spacing: 0.5px;
+  background: var(--bg-secondary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  opacity: 0.75;
+}
+
+/* ── Uniform status inline badge ── */
+.uni-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: 20px;
+  font-size: 12px; font-weight: 700;
+}
+.uni-badge--received     { background: rgba(16,185,129,0.15); color: var(--teal); }
+.uni-badge--not_received { background: rgba(239,68,68,0.15);  color: var(--red);  }
+.uni-badge--pending      { background: rgba(245,158,11,0.15); color: var(--amber); }
+
+/* ── Master Course → Sub-Course cascade selects ── */
+.cascade-select-group { display: flex; flex-direction: column; gap: 16px; }
+.cascade-step {
+  border-left: 3px solid var(--border);
+  padding-left: 14px;
+  transition: border-color 0.2s;
+}
+.cascade-step.active { border-color: var(--accent); }
+.cascade-step-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.6px; color: var(--text-muted); margin-bottom: 6px;
+}
+
+/* ── FREE Course Completion Banner ── */
+.free-completion-banner {
+  background: rgba(16,185,129,0.08);
+  border: 1px solid rgba(16,185,129,0.25);
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px;
+  font-size: 13px; color: var(--teal);
+}

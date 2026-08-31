@@ -111,7 +111,12 @@ const StudentList: React.FC = () => {
         disc_cert_diploma: discCertDiploma,
       });
       toast.success(`${discontinueDetails.student.full_name} has been discontinued.`);
+      // Optimistically remove from active list immediately
+      setStudents(prev => prev.filter(s => s.id !== discontinueDetails.student.id));
+      setTotal(prev => Math.max(0, prev - 1));
       setShowCertModal(false);
+      setDiscontinueDetails(null);
+      // Then re-fetch to sync with server
       fetchStudents();
     } catch (err: any) {
       if (err.response?.status === 422) {
@@ -230,7 +235,7 @@ const StudentList: React.FC = () => {
                     <td>{s.mobile}</td>
                     <td>{s.course_name || '—'}</td>
                     <td>{s.batch_name || '—'}</td>
-                    <td>{s.admission_date ? new Date(s.admission_date).toLocaleDateString() : '—'}</td>
+                    <td>{s.admission_date ? new Date(s.admission_date).toLocaleDateString('en-GB') : '—'}</td>
                     <td><span className={`badge badge-${s.status}`}>{s.status}</span></td>
                     {isAdmin && (
                       <td>

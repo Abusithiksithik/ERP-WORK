@@ -40,8 +40,8 @@ const DiscontinuedStudents: React.FC = () => {
       const params: any = { page, limit };
       if (search) params.search = search;
       const res = await api.get('/students/discontinued', { params });
-      setStudents(res.data.data);
-      setTotal(res.data.total);
+      setStudents(res.data.data ?? []);
+      setTotal(res.data.total ?? 0);
     } catch {
       toast.error('Failed to load discontinued students');
     } finally {
@@ -50,7 +50,15 @@ const DiscontinuedStudents: React.FC = () => {
   }, [page, search]);
 
   useEffect(() => { fetchStudents(); }, [fetchStudents]);
-  useEffect(() => { api.get('/courses').then(r => setCourses(r.data.data)); }, []);
+
+  // Load courses once on mount, with proper error handling
+  useEffect(() => {
+    let cancelled = false;
+    api.get('/courses')
+      .then(r => { if (!cancelled) setCourses(r.data?.data ?? []); })
+      .catch(() => { /* courses are optional for the list view */ });
+    return () => { cancelled = true; };
+  }, []);
 
   // ─── Edit ──────────────────────────────────────────────────────────
   const openEdit = (s: Student) => {
@@ -72,7 +80,9 @@ const DiscontinuedStudents: React.FC = () => {
     setPhotoPreview(s.photo_url || null);
     setBatches([]);
     if (s.course_id) {
-      api.get('/batches', { params: { course_id: s.course_id } }).then(r => setBatches(r.data.data));
+      api.get('/batches', { params: { course_id: s.course_id } })
+        .then(r => setBatches(r.data?.data ?? []))
+        .catch(() => {});
     }
     setShowEditModal(true);
   };
@@ -84,7 +94,7 @@ const DiscontinuedStudents: React.FC = () => {
     setBatchLoading(true);
     try {
       const r = await api.get('/batches', { params: { course_id: courseId } });
-      setBatches(r.data.data);
+      setBatches(r.data?.data ?? []);
     } catch { toast.error('Failed to load batches'); }
     finally { setBatchLoading(false); }
   };
@@ -98,10 +108,18 @@ const DiscontinuedStudents: React.FC = () => {
       Object.entries(editForm).forEach(([k, v]) => {
         if (v !== undefined && v !== null) fd.append(k, String(v));
       });
+      // Always keep status as discontinued when editing from this page
+      fd.set('status', 'discontinued');
       if (photoRef.current?.files?.[0]) fd.append('photo', photoRef.current.files[0]);
-      await api.put(`/students/${editStudent.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const res = await api.put(`/students/${editStudent.id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success('Student details updated!');
+      // Update the student in local list immediately
+      if (res.data?.data) {
+        const updated = res.data.data;
+        setStudents(prev => prev.map(s => s.id === editStudent.id ? { ...s, ...updated } : s));
+      }
       setShowEditModal(false);
+      setEditStudent(null);
       fetchStudents();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Update failed');
@@ -125,7 +143,12 @@ const DiscontinuedStudents: React.FC = () => {
     try {
       await api.post(`/students/${restoreStudent.id}/restore`);
       toast.success(`${restoreStudent.full_name} restored to active students!`);
+      // Optimistically remove from discontinued list immediately
+      setStudents(prev => prev.filter(s => s.id !== restoreStudent.id));
+      setTotal(prev => Math.max(0, prev - 1));
       setShowRestoreModal(false);
+      setRestoreStudent(null);
+      // Re-fetch to sync with server
       fetchStudents();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Restore failed');
@@ -146,7 +169,12 @@ const DiscontinuedStudents: React.FC = () => {
     try {
       await api.delete(`/students/${deleteStudent.id}`);
       toast.success(`${deleteStudent.full_name} has been permanently deleted.`);
+      // Optimistically remove from list immediately
+      setStudents(prev => prev.filter(s => s.id !== deleteStudent.id));
+      setTotal(prev => Math.max(0, prev - 1));
       setShowDeleteModal(false);
+      setDeleteStudent(null);
+      // Re-fetch to sync with server
       fetchStudents();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Delete failed');
@@ -225,7 +253,7 @@ const DiscontinuedStudents: React.FC = () => {
                     <td>{s.course_name || '—'}</td>
                     <td>
                       {s.discontinued_at
-                        ? new Date(s.discontinued_at).toLocaleDateString()
+                        ? new Date(s.discontinued_at).toLocaleDateString('en-GB')
                         : '—'}
                     </td>
                     <td style={{ maxWidth: 200, fontSize: 12, color: 'var(--text-muted)' }}>

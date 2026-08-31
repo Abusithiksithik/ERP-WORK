@@ -69,6 +69,22 @@ export const uploadMaterial = multer({ storage: createStorage('materials'), file
 // Certificate upload — no file size limit
 export const uploadCertificate = multer({ storage: createStorage('certificates'), fileFilter: certFilter });
 
+// Consent upload: accepts images (jpg/png/webp), PDF documents, and videos (mp4/mov/webm)
+const consentFilter = (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+  const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
+  const allowed = /jpeg|jpg|png|webp|pdf|mp4|mov|webm|mkv/;
+  if (allowed.test(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Consent file must be an image (JPG/PNG/WEBP), PDF, or video (MP4/MOV/WEBM)'));
+  }
+};
+
+export const uploadConsentImage = multer({ storage: createStorage('consent'), fileFilter: imageFilter, limits: { fileSize: 10 * MB } });
+export const uploadConsentPdf   = multer({ storage: createStorage('consent'), fileFilter: certFilter, limits: { fileSize: 20 * MB } });
+export const uploadConsentVideo = multer({ storage: createStorage('consent'), fileFilter: videoFilter, limits: { fileSize: 500 * MB } });
+export const uploadConsent      = multer({ storage: createStorage('consent'), fileFilter: consentFilter, limits: { fileSize: 500 * MB } });
+
 export const uploadVideoWithThumb = multer({
   storage: multer.diskStorage({
     destination: (_req, file, cb) => {

@@ -1,13 +1,25 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { FiUpload, FiFileText, FiUser, FiChevronDown, FiImage, FiAlertCircle } from 'react-icons/fi';
+import { FiUpload, FiFileText, FiUser, FiChevronDown, FiImage, FiAlertCircle, FiVideo, FiFilePlus, FiCheckCircle } from 'react-icons/fi';
 import api from '../../api/axios';
-import { Course, Batch } from '../../types';
+import { CourseCategory, Course, Batch } from '../../types';
 
 interface CertFile { file: File | null; preview: string | null; }
 
-const MASTER_COURSE_NAMES = ['IMR', 'TN', 'FREE'];
+// Helper: format date as DD/MM/YYYY for display
+const fmtDate = (iso: string) => {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+};
+
+// Add 3 months to an ISO date string
+const addThreeMonths = (isoDate: string): string => {
+  const d = new Date(isoDate);
+  d.setMonth(d.getMonth() + 3);
+  return d.toISOString().split('T')[0];
+};
 
 const StudentAdd: React.FC = () => {
   const navigate = useNavigate();
@@ -15,7 +27,9 @@ const StudentAdd: React.FC = () => {
   const cert10Ref     = useRef<HTMLInputElement>(null);
   const cert12Ref     = useRef<HTMLInputElement>(null);
   const certDipRef    = useRef<HTMLInputElement>(null);
-  const consentImgRef = useRef<HTMLInputElement>(null);
+  const consentImgRef   = useRef<HTMLInputElement>(null);
+  const consentPdfRef   = useRef<HTMLInputElement>(null);
+  const consentVideoRef = useRef<HTMLInputElement>(null);
 
   const [loading, setLoading] = useState(false);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
@@ -25,8 +39,11 @@ const StudentAdd: React.FC = () => {
     '12th':    { file: null, preview: null },
     'diploma': { file: null, preview: null },
   });
+  // Consent — three separate files
+  const [consentImageFile, setConsentImageFile]     = useState<File | null>(null);
   const [consentImagePreview, setConsentImagePreview] = useState<string | null>(null);
-  const [consentImageFile, setConsentImageFile]       = useState<File | null>(null);
+  const [consentPdfFile, setConsentPdfFile]         = useState<File | null>(null);
+  const [consentVideoFile, setConsentVideoFile]     = useState<File | null>(null);
 
   const [form, setForm] = useState({
     full_name: '', mobile: '', email: '',
@@ -35,46 +52,85 @@ const StudentAdd: React.FC = () => {
     status: 'active',
     cert_10th_collected: false, cert_12th_collected: false, cert_diploma_collected: false,
     consent_given: false,
+    admission_date: new Date().toISOString().split('T')[0],
+    uniform_received: false,
+    accommodation_type: 'day_scholar',
   });
 
-  // Course + Batch
-  const [allCourses, setAllCourses] = useState<Course[]>([]);
-  const [allBatches, setAllBatches] = useState<Batch[]>([]);
-  const [selectedCourse, setSelectedCourse] = useState('');
-  const [selectedBatch, setSelectedBatch]   = useState('');
+  // ── Cascade State ────────────────────────────────────────
+  const [masterCategories, setMasterCategories] = useState<CourseCategory[]>([]);
+  const [allCourses, setAllCourses]             = useState<Course[]>([]);
+  const [subCourses, setSubCourses]             = useState<Course[]>([]);
+  const [batches, setBatches]                   = useState<Batch[]>([]);
+
+  const [selectedMaster, setSelectedMaster] = useState('');   // category id
+  const [selectedCourse, setSelectedCourse] = useState('');   // course (sub-course) id
+  const [selectedBatch, setSelectedBatch]   = useState('');   // batch id
 
   // Payment
-  const [initialPayment, setInitialPayment]   = useState('');
-  const [paymentMethod, setPaymentMethod]     = useState('cash');
-  const [payLater, setPayLater]               = useState(false);
+  const [initialPayment, setInitialPayment] = useState('');
+  const [paymentMethod, setPaymentMethod]   = useState('cash');
+  const [payLater, setPayLater]             = useState(false);
 
   // Internship plan
-  const [showInternship, setShowInternship]     = useState(false);
+  const [showInternship, setShowInternship]       = useState(false);
   const [internshipMonthly, setInternshipMonthly] = useState('');
   const [internshipMonths, setInternshipMonths]   = useState('');
 
+  // ── Load master categories + all courses on mount ────────
   useEffect(() => {
-    api.get('/courses').then(r => {
-      const courses: Course[] = r.data.data || [];
-      // Only show master courses: IMR, TN, FREE
-      const masterCourses = courses.filter(c =>
-        MASTER_COURSE_NAMES.includes(c.course_name.toUpperCase()) && c.status === 'active'
-      );
-      setAllCourses(masterCourses.length > 0 ? masterCourses : courses.filter(c => c.status === 'active'));
-    }).catch(() => {});
-    api.get('/batches').then(r => setAllBatches(r.data.data || [])).catch(() => {});
+    Promise.all([
+      api.get('/categories'),
+      api.get('/courses'),
+    ]).then(([catRes, courseRes]) => {
+      const cats: CourseCategory[] = catRes.data.data || [];
+      const courses: Course[]      = courseRes.data.data || [];
+      // Only show active master categories (IMA, TNSCVT, Vetri Nichayam)
+      const activeCats = cats.filter(c => c.status === 'active');
+      setMasterCategories(activeCats);
+      setAllCourses(courses.filter(c => c.status === 'active'));
+    }).catch(() => toast.error('Failed to load course data'));
   }, []);
 
-  // Computed values
-  const selectedCourseObj = allCourses.find(c => String(c.id) === selectedCourse);
-  const courseFee = selectedCourseObj ? Number(selectedCourseObj.fee_amount || 0) : 0;
-  const isFree    = selectedCourseObj?.is_free || courseFee === 0;
-  const initPayAmt = Math.max(0, Number(initialPayment) || 0);
-  const totalPaid  = initPayAmt;
-  const balance    = Math.max(0, courseFee - totalPaid);
+  // ── Cascade: master → sub-courses ────────────────────────
+  const handleMasterChange = (catId: string) => {
+    setSelectedMaster(catId);
+    setSelectedCourse('');
+    setSelectedBatch('');
+    setBatches([]);
+    setInitialPayment('');
+    setPayLater(false);
+    if (catId) {
+      setSubCourses(allCourses.filter(c => String(c.category_id) === catId));
+    } else {
+      setSubCourses([]);
+    }
+  };
 
-  const internshipPlannedTotal = (Number(internshipMonthly) || 0) * (Number(internshipMonths) || 0);
+  // ── Cascade: sub-course → batches ────────────────────────
+  const handleCourseChange = async (courseId: string) => {
+    setSelectedCourse(courseId);
+    setSelectedBatch('');
+    setBatches([]);
+    setInitialPayment('');
+    setPayLater(false);
+    if (!courseId) return;
+    try {
+      const r = await api.get('/batches', { params: { course_id: courseId } });
+      setBatches((r.data.data || []).filter((b: Batch) => b.status === 'active'));
+    } catch { toast.error('Failed to load batch years'); }
+  };
 
+  // ── Derived values ────────────────────────────────────────
+  const selectedCourseObj  = allCourses.find(c => String(c.id) === selectedCourse);
+  const isFree             = selectedCourseObj?.is_free || false;
+  const courseFee          = isFree ? 0 : Number(selectedCourseObj?.fee_amount || 0);
+  const initPayAmt         = Math.max(0, Number(initialPayment) || 0);
+  const balance            = Math.max(0, courseFee - initPayAmt);
+  const internshipTotal    = (Number(internshipMonthly) || 0) * (Number(internshipMonths) || 0);
+  const completionDate     = isFree && form.admission_date ? addThreeMonths(form.admission_date) : null;
+
+  // ── File handlers ─────────────────────────────────────────
   const handleCertFileChange = (certType: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -88,70 +144,75 @@ const StudentAdd: React.FC = () => {
     setConsentImageFile(file);
     setConsentImagePreview(URL.createObjectURL(file));
   };
-
-  const handleCourseChange = (courseId: string) => {
-    setSelectedCourse(courseId);
-    setSelectedBatch('');
-    setInitialPayment('');
-    setPayLater(false);
+  const handleConsentPdfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setConsentPdfFile(file);
+  };
+  const handleConsentVideoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setConsentVideoFile(file);
   };
 
+  // ── Submit ────────────────────────────────────────────────
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setEmailError('');
+
     if (!form.full_name.trim()) { toast.error('Full name is required'); return; }
     if (!form.mobile.trim())    { toast.error('Mobile number is required'); return; }
     if (!form.email.trim())     { toast.error('Email is required'); return; }
-    if (!selectedBatch)         { toast.error('Batch Year is required — please select a batch'); return; }
-    if (!selectedCourse)        { toast.error('Course is required — please select a course'); return; }
-    if (initPayAmt > 0 && initPayAmt > courseFee) {
-      toast.error('Initial payment cannot exceed the course fee');
-      return;
-    }
+    if (!selectedMaster)        { toast.error('Please select a Master Course'); return; }
+    if (!selectedCourse)        { toast.error('Please select a Sub-Course'); return; }
+    if (!isFree && !selectedBatch) { toast.error('Batch Year is required for paid courses'); return; }
+    if (initPayAmt > courseFee)    { toast.error('Initial payment cannot exceed course fee'); return; }
 
     setLoading(true);
     try {
       const fd = new FormData();
-      fd.append('full_name', form.full_name.trim());
-      fd.append('mobile', form.mobile.trim());
-      fd.append('email', form.email.trim().toLowerCase());
+      fd.append('full_name',  form.full_name.trim());
+      fd.append('mobile',     form.mobile.trim());
+      fd.append('email',      form.email.trim().toLowerCase());
       if (form.date_of_birth) fd.append('date_of_birth', form.date_of_birth);
       if (form.gender)        fd.append('gender', form.gender);
       if (form.address)       fd.append('address', form.address);
-      fd.append('status', form.status);
+      fd.append('status',           form.status);
+      fd.append('admission_date',   form.admission_date);
       fd.append('cert_10th_collected',    String(form.cert_10th_collected));
       fd.append('cert_12th_collected',    String(form.cert_12th_collected));
       fd.append('cert_diploma_collected', String(form.cert_diploma_collected));
-      fd.append('consent_given', String(form.consent_given));
+      fd.append('consent_given',          String(form.consent_given));
+      fd.append('uniform_received',       String(form.uniform_received));
+      fd.append('accommodation_type',     form.accommodation_type);
+
       if (form.guardian_type) {
-        fd.append('guardian_type', form.guardian_type);
+        fd.append('guardian_type',  form.guardian_type);
         fd.append('parent_present', 'true');
         if (form.parent_name)   fd.append('parent_name',   form.parent_name);
         if (form.parent_mobile) fd.append('parent_mobile', form.parent_mobile);
       }
-      fd.append('course_id', selectedCourse);
-      fd.append('batch_id',  selectedBatch);
 
-      // Initial payment
+      fd.append('course_id', selectedCourse);
+      if (selectedBatch) fd.append('batch_id', selectedBatch);
+
       if (!payLater && initPayAmt > 0) {
-        fd.append('initial_payment', String(initPayAmt));
-        fd.append('payment_method', paymentMethod);
+        fd.append('initial_payment',   String(initPayAmt));
+        fd.append('payment_method',    paymentMethod);
         fd.append('payment_type_label', 'Initial payment at admission');
       }
-
-      // Internship plan (stored as notes — NOT actual payment)
       if (showInternship && internshipMonthly && internshipMonths) {
         fd.append('internship_monthly', internshipMonthly);
         fd.append('internship_months',  internshipMonths);
       }
 
       if (photoRef.current?.files?.[0]) fd.append('photo', photoRef.current.files[0]);
-      if (consentImageFile)             fd.append('consent_image', consentImageFile);
+      fd.append('consent_given', String(form.consent_given));
 
       const res = await api.post('/students', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       const studentId = res.data.data.id;
 
-      // Upload certs
+      // Upload certificates
       const certMap: Record<string, string> = {
         cert_10th_collected: '10th', cert_12th_collected: '12th', cert_diploma_collected: 'diploma',
       };
@@ -166,12 +227,26 @@ const StudentAdd: React.FC = () => {
         }
       }
 
+      // Upload consent files via dedicated endpoints
+      if (consentImageFile) {
+        const cfd = new FormData(); cfd.append('file', consentImageFile);
+        await api.post(`/students/${studentId}/consent-image`, cfd, { headers: { 'Content-Type': 'multipart/form-data' } }).catch(() => {});
+      }
+      if (consentPdfFile) {
+        const cfd = new FormData(); cfd.append('file', consentPdfFile);
+        await api.post(`/students/${studentId}/consent-pdf`, cfd, { headers: { 'Content-Type': 'multipart/form-data' } }).catch(() => {});
+      }
+      if (consentVideoFile) {
+        const cfd = new FormData(); cfd.append('file', consentVideoFile);
+        await api.post(`/students/${studentId}/consent-video`, cfd, { headers: { 'Content-Type': 'multipart/form-data' } }).catch(() => {});
+      }
+
       toast.success('Student added successfully!');
       navigate(`/students/${studentId}`);
     } catch (err: any) {
       const errData = err.response?.data;
       if (errData?.error === 'DUPLICATE_EMAIL') {
-        setEmailError(errData.message || 'This email already exists. Please use a different email.');
+        setEmailError(errData.message || 'This email already exists.');
         toast.error('Duplicate email — please use a different email address');
       } else {
         toast.error(errData?.message || 'Failed to add student');
@@ -188,11 +263,6 @@ const StudentAdd: React.FC = () => {
     '12th':    { key: 'cert_12th_collected',    label: '12th / HSC Marksheet' },
     'diploma': { key: 'cert_diploma_collected', label: 'TC / Diploma Certificate' },
   };
-
-  // Batches filtered by selected course
-  const filteredBatches = selectedCourse
-    ? allBatches.filter(b => String(b.course_id) === selectedCourse)
-    : allBatches;
 
   return (
     <div>
@@ -244,14 +314,15 @@ const StudentAdd: React.FC = () => {
                 style={emailError ? { borderColor: 'var(--red)' } : {}}
               />
               {emailError && (
-                <div className="field-error">
-                  <FiAlertCircle size={12} style={{ marginRight: 4 }} />{emailError}
-                </div>
+                <div className="field-error"><FiAlertCircle size={12} style={{ marginRight: 4 }} />{emailError}</div>
               )}
             </div>
             <div className="form-group">
               <label className="form-label">Date of Birth</label>
-              <input type="date" className="form-control" value={form.date_of_birth} onChange={set('date_of_birth')} max={new Date().toISOString().split('T')[0]} />
+              <div className="date-field-wrap" data-format="DD/MM/YYYY">
+                <input type="date" className="form-control" value={form.date_of_birth} onChange={set('date_of_birth')} max={new Date().toISOString().split('T')[0]} />
+              </div>
+              {form.date_of_birth && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{fmtDate(form.date_of_birth)}</div>}
             </div>
             <div className="form-group">
               <label className="form-label">Gender</label>
@@ -261,6 +332,13 @@ const StudentAdd: React.FC = () => {
                 <option value="Female">Female</option>
                 <option value="Other">Other</option>
               </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Joining / Admission Date</label>
+              <div className="date-field-wrap" data-format="DD/MM/YYYY">
+                <input type="date" className="form-control" value={form.admission_date} onChange={e => { set('admission_date')(e); }} />
+              </div>
+              {form.admission_date && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{fmtDate(form.admission_date)}</div>}
             </div>
             <div className="form-group">
               <label className="form-label">Status</label>
@@ -276,55 +354,97 @@ const StudentAdd: React.FC = () => {
           </div>
         </div>
 
-        {/* SECTION 3: Course & Batch & Payment */}
+        {/* SECTION 3: Master Course → Sub-Course → Batch Year */}
         <div className="card" style={{ marginBottom: 16 }}>
-          <h3 className="section-heading">📚 Course, Batch & Payment</h3>
-          <div className="form-grid">
-            <div className="form-group">
-              <label className="form-label">Course <span style={{ color: 'var(--red)' }}>*</span></label>
+          <h3 className="section-heading">📚 Course Enrollment</h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, marginTop: -8 }}>
+            Select Master Course, then Sub-Course, then Batch Year
+          </p>
+
+          {/* Step 1: Master Course */}
+          <div className={`cascade-step ${selectedMaster ? 'active' : ''}`} style={{ marginBottom: 16 }}>
+            <div className="cascade-step-label">Step 1 — Master Course *</div>
+            <div style={{ position: 'relative' }}>
+              <select
+                className="form-control"
+                value={selectedMaster}
+                onChange={e => handleMasterChange(e.target.value)}
+                required
+                style={{ paddingRight: 32, appearance: 'none' }}
+              >
+                <option value="">— Select Master Course —</option>
+                {masterCategories.map(cat => (
+                  <option key={cat.id} value={cat.id}>{cat.category_name}</option>
+                ))}
+              </select>
+              <FiChevronDown style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)' }} />
+            </div>
+          </div>
+
+          {/* Step 2: Sub-Course */}
+          {selectedMaster && (
+            <div className={`cascade-step ${selectedCourse ? 'active' : ''}`} style={{ marginBottom: 16 }}>
+              <div className="cascade-step-label">Step 2 — Sub-Course *</div>
               <div style={{ position: 'relative' }}>
                 <select
-                  className="form-control" value={selectedCourse}
+                  className="form-control"
+                  value={selectedCourse}
                   onChange={e => handleCourseChange(e.target.value)}
-                  required style={{ paddingRight: 32, appearance: 'none' }}
+                  required
+                  style={{ paddingRight: 32, appearance: 'none' }}
                 >
-                  <option value="">— Select Course *—</option>
-                  {allCourses.map(c => (
+                  <option value="">— Select Sub-Course —</option>
+                  {subCourses.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.course_name}
-                      {c.is_free ? ' — FREE' : ` — ₹${Number(c.fee_amount).toLocaleString('en-IN')}`}
+                      {c.course_name} {c.is_free ? '(FREE — 3 months)' : `— ₹${Number(c.fee_amount).toLocaleString('en-IN')} / 2 Years`}
                     </option>
                   ))}
                 </select>
                 <FiChevronDown style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)' }} />
               </div>
             </div>
+          )}
 
-            <div className="form-group">
-              <label className="form-label">Batch Year <span style={{ color: 'var(--red)' }}>*</span></label>
+          {/* FREE course completion info */}
+          {isFree && selectedCourse && completionDate && (
+            <div className="free-completion-banner" style={{ marginBottom: 16 }}>
+              ✅ <strong>Free Course (3 Months):</strong>&nbsp;
+              Completion Date auto-set to <strong>{fmtDate(completionDate)}</strong> &nbsp;
+              <span style={{ fontSize: 11, color: 'var(--teal)', opacity: 0.8 }}>(Admission Date + 3 months)</span>
+            </div>
+          )}
+
+          {/* Step 3: Batch Year */}
+          {selectedCourse && (
+            <div className={`cascade-step ${selectedBatch ? 'active' : ''}`} style={{ marginBottom: 16 }}>
+              <div className="cascade-step-label">Step 3 — Batch Year {isFree ? '(Optional)' : '*'}</div>
               <div style={{ position: 'relative' }}>
                 <select
-                  className="form-control" value={selectedBatch}
+                  className="form-control"
+                  value={selectedBatch}
                   onChange={e => setSelectedBatch(e.target.value)}
-                  required
-                  style={{ paddingRight: 32, appearance: 'none', borderColor: !selectedBatch ? 'var(--amber)' : undefined }}
+                  style={{ paddingRight: 32, appearance: 'none', borderColor: !isFree && !selectedBatch ? 'var(--amber)' : undefined }}
                 >
-                  <option value="">— Select Batch Year * —</option>
-                  {(selectedCourse ? filteredBatches : allBatches).map(b => (
-                    <option key={b.id} value={b.id}>{b.batch_name}{b.course_name ? ` · ${b.course_name}` : ''}</option>
+                  <option value="">— Select Batch Year —</option>
+                  {batches.map(b => (
+                    <option key={b.id} value={b.id}>{b.batch_name}</option>
                   ))}
                 </select>
                 <FiChevronDown style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)' }} />
               </div>
-              {!selectedBatch && <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4, fontWeight: 600 }}>⚠ Batch year is mandatory</p>}
+              {!isFree && !selectedBatch && (
+                <p style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4, fontWeight: 600 }}>⚠ Batch year is mandatory for paid courses</p>
+              )}
             </div>
-          </div>
+          )}
 
           {/* Fee Preview */}
           {selectedCourse && (
             <div className="fee-preview-box">
-              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: 'var(--text-secondary)' }}>
-                💰 Fee Summary
+              <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 10, color: 'var(--text-secondary)' }}>💰 Fee Summary</div>
+              <div className="fee-preview-row">
+                <span>Course</span>
+                <span style={{ fontWeight: 700 }}>{selectedCourseObj?.course_name || '—'}</span>
               </div>
               <div className="fee-preview-row">
                 <span>Course Fee</span>
@@ -333,111 +453,100 @@ const StudentAdd: React.FC = () => {
                 </span>
               </div>
               <div className="fee-preview-row">
-                <span>Initial Payment</span>
-                <span style={{ color: 'var(--teal)' }}>₹{totalPaid.toLocaleString('en-IN')}</span>
+                <span>Duration</span>
+                <span>{isFree ? '3 Months' : '2 Years'}</span>
               </div>
-              <div className="fee-preview-row">
-                <span style={{ fontWeight: 700 }}>Balance</span>
-                <span style={{ color: balance > 0 ? 'var(--red)' : 'var(--teal)', fontWeight: 700 }}>
-                  ₹{balance.toLocaleString('en-IN')}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* Payment Section */}
-          {selectedCourse && !isFree && (
-            <div style={{ marginTop: 16 }}>
-              {/* Pay Later toggle */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                <label style={{
-                  display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none',
-                  padding: '10px 16px', borderRadius: 10,
-                  border: `2px solid ${payLater ? 'var(--amber)' : 'var(--border-light)'}`,
-                  background: payLater ? 'rgba(245,158,11,0.08)' : 'var(--bg-tertiary)',
-                  flex: 1,
-                }}>
-                  <input type="checkbox" checked={payLater} onChange={e => { setPayLater(e.target.checked); if (e.target.checked) setInitialPayment(''); }}
-                    style={{ width: 18, height: 18, accentColor: 'var(--amber)', cursor: 'pointer' }} />
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: payLater ? 'var(--amber)' : 'var(--text-primary)' }}>
-                      ⏳ Pay Later
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Student will pay fees later</div>
-                  </div>
-                </label>
-              </div>
-
-              {!payLater && (
+              {!isFree && (
                 <>
-                  <div className="form-grid">
-                    <div className="form-group">
-                      <label className="form-label">💰 Initial Payment ₹ <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(Optional)</span></label>
-                      <input
-                        type="number" className="form-control"
-                        value={initialPayment}
-                        onChange={e => setInitialPayment(e.target.value)}
-                        placeholder={`e.g. 5000 (max ₹${courseFee.toLocaleString('en-IN')})`}
-                        min={0} max={courseFee}
-                      />
-                    </div>
-                    {initPayAmt > 0 && (
-                      <div className="form-group">
-                        <label className="form-label">Payment Method <span style={{ color: 'var(--red)' }}>*</span></label>
-                        <select className="form-control" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
-                          <option value="cash">Cash</option>
-                          <option value="upi">GPay / UPI</option>
-                          <option value="bank">Bank Transfer</option>
-                        </select>
-                      </div>
-                    )}
+                  <div className="fee-preview-row">
+                    <span>Initial Payment</span>
+                    <span style={{ color: 'var(--teal)' }}>₹{initPayAmt.toLocaleString('en-IN')}</span>
+                  </div>
+                  <div className="fee-preview-row">
+                    <span style={{ fontWeight: 700 }}>Balance</span>
+                    <span style={{ color: balance > 0 ? 'var(--red)' : 'var(--teal)', fontWeight: 700 }}>
+                      ₹{balance.toLocaleString('en-IN')}
+                    </span>
                   </div>
                 </>
               )}
+            </div>
+          )}
+
+          {/* Payment Section for paid courses */}
+          {selectedCourse && !isFree && (
+            <div style={{ marginTop: 16 }}>
+              <label style={{
+                display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none',
+                padding: '10px 16px', borderRadius: 10, marginBottom: 16,
+                border: `2px solid ${payLater ? 'var(--amber)' : 'var(--border-light)'}`,
+                background: payLater ? 'rgba(245,158,11,0.08)' : 'var(--bg-tertiary)',
+              }}>
+                <input type="checkbox" checked={payLater} onChange={e => { setPayLater(e.target.checked); if (e.target.checked) setInitialPayment(''); }}
+                  style={{ width: 18, height: 18, accentColor: 'var(--amber)', cursor: 'pointer' }} />
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: payLater ? 'var(--amber)' : 'var(--text-primary)' }}>⏳ Pay Later</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Student will pay fees later</div>
+                </div>
+              </label>
+
+              {!payLater && (
+                <div className="form-grid">
+                  <div className="form-group">
+                    <label className="form-label">💰 Initial Payment ₹ <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(Optional)</span></label>
+                    <input
+                      type="number" className="form-control"
+                      value={initialPayment}
+                      onChange={e => setInitialPayment(e.target.value)}
+                      placeholder={`e.g. 5000 (max ₹${courseFee.toLocaleString('en-IN')})`}
+                      min={0} max={courseFee}
+                    />
+                  </div>
+                  {initPayAmt > 0 && (
+                    <div className="form-group">
+                      <label className="form-label">Payment Method <span style={{ color: 'var(--red)' }}>*</span></label>
+                      <select className="form-control" value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                        <option value="cash">Cash</option>
+                        <option value="upi">GPay / UPI</option>
+                        <option value="bank">Bank Transfer</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Internship Plan */}
-              <div style={{ marginTop: 8 }}>
-                <label style={{
-                  display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none',
-                  padding: '10px 16px', borderRadius: 10,
-                  border: `2px solid ${showInternship ? 'var(--accent)' : 'var(--border-light)'}`,
-                  background: showInternship ? 'rgba(99,102,241,0.06)' : 'var(--bg-tertiary)',
-                }}>
-                  <input type="checkbox" checked={showInternship} onChange={e => setShowInternship(e.target.checked)}
-                    style={{ width: 18, height: 18, accentColor: 'var(--accent)', cursor: 'pointer' }} />
-                  <div>
-                    <div style={{ fontSize: 14, fontWeight: 700, color: showInternship ? 'var(--accent)' : 'var(--text-primary)' }}>
-                      🎓 Internship Payment Plan
-                    </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      Monthly installments — plan only, does NOT count as actual payment
-                    </div>
+              <label style={{
+                display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none',
+                padding: '10px 16px', borderRadius: 10, marginTop: 8,
+                border: `2px solid ${showInternship ? 'var(--accent)' : 'var(--border-light)'}`,
+                background: showInternship ? 'rgba(99,102,241,0.06)' : 'var(--bg-tertiary)',
+              }}>
+                <input type="checkbox" checked={showInternship} onChange={e => setShowInternship(e.target.checked)}
+                  style={{ width: 18, height: 18, accentColor: 'var(--accent)', cursor: 'pointer' }} />
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: showInternship ? 'var(--accent)' : 'var(--text-primary)' }}>🎓 Internship Payment Plan</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Monthly installments — plan only</div>
+                </div>
+              </label>
+              {showInternship && (
+                <div className="form-grid" style={{ marginTop: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">Monthly Amount ₹</label>
+                    <input type="number" className="form-control" value={internshipMonthly} onChange={e => setInternshipMonthly(e.target.value)} placeholder="e.g. 5000" min={0} />
                   </div>
-                </label>
-
-                {showInternship && (
-                  <div className="form-grid" style={{ marginTop: 12 }}>
-                    <div className="form-group">
-                      <label className="form-label">Monthly Amount ₹</label>
-                      <input type="number" className="form-control" value={internshipMonthly}
-                        onChange={e => setInternshipMonthly(e.target.value)} placeholder="e.g. 5000" min={0} />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Number of Months</label>
-                      <input type="number" className="form-control" value={internshipMonths}
-                        onChange={e => setInternshipMonths(e.target.value)} placeholder="e.g. 4" min={1} max={24} />
-                    </div>
-                    {internshipPlannedTotal > 0 && (
-                      <div style={{ gridColumn: '1 / -1' }}>
-                        <div style={{ padding: '10px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', fontSize: 13 }}>
-                          📋 <strong>Planned Total:</strong> ₹{internshipMonthly} × {internshipMonths} months = <strong style={{ color: 'var(--accent)' }}>₹{internshipPlannedTotal.toLocaleString('en-IN')}</strong>
-                          <span style={{ color: 'var(--amber)', marginLeft: 8, fontWeight: 600 }}>⚠ Plan only — not counted as actual payment</span>
-                        </div>
-                      </div>
-                    )}
+                  <div className="form-group">
+                    <label className="form-label">Number of Months</label>
+                    <input type="number" className="form-control" value={internshipMonths} onChange={e => setInternshipMonths(e.target.value)} placeholder="e.g. 4" min={1} max={24} />
                   </div>
-                )}
-              </div>
+                  {internshipTotal > 0 && (
+                    <div style={{ gridColumn: '1 / -1', padding: '10px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', fontSize: 13 }}>
+                      📋 <strong>Planned Total:</strong> ₹{internshipMonthly} × {internshipMonths} months = <strong style={{ color: 'var(--accent)' }}>₹{internshipTotal.toLocaleString('en-IN')}</strong>
+                      <span style={{ color: 'var(--amber)', marginLeft: 8, fontWeight: 600 }}>⚠ Plan only — not actual payment</span>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -481,7 +590,62 @@ const StudentAdd: React.FC = () => {
           )}
         </div>
 
-        {/* SECTION 5: Certificate Verification */}
+        {/* SECTION 5: Uniform */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-heading">👕 Uniform</h3>
+          <label style={{
+            display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', userSelect: 'none',
+            padding: '14px 18px', borderRadius: 10,
+            border: `2px solid ${form.uniform_received ? 'var(--teal)' : 'var(--border-light)'}`,
+            background: form.uniform_received ? 'rgba(16,185,129,0.07)' : 'var(--bg-tertiary)',
+            transition: 'all 0.2s',
+          }}>
+            <input type="checkbox" checked={form.uniform_received}
+              onChange={e => setForm(f => ({ ...f, uniform_received: e.target.checked }))}
+              style={{ width: 20, height: 20, accentColor: 'var(--teal)', cursor: 'pointer', flexShrink: 0 }} />
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: form.uniform_received ? 'var(--teal)' : 'var(--text-primary)' }}>
+                {form.uniform_received ? '✅ Uniform Received' : '⬜ Uniform Not Received'}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Check if student has received uniform</div>
+            </div>
+          </label>
+        </div>
+
+        {/* SECTION: Accommodation Type */}
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h3 className="section-heading">🏠 Accommodation Type</h3>
+          <div style={{ display: 'flex', gap: 12 }}>
+            {[
+              { value: 'day_scholar', label: '🏫 Day Scholar', desc: 'Student commutes daily' },
+              { value: 'hostel',      label: '🏠 Hostel',      desc: 'Student stays in hostel' },
+            ].map(opt => (
+              <label key={opt.value} style={{
+                flex: 1, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
+                padding: '14px 18px', borderRadius: 10,
+                border: `2px solid ${form.accommodation_type === opt.value ? 'var(--accent)' : 'var(--border-light)'}`,
+                background: form.accommodation_type === opt.value ? 'rgba(99,102,241,0.08)' : 'var(--bg-tertiary)',
+                transition: 'all 0.2s',
+              }}>
+                <input type="radio" name="accommodation_type" value={opt.value}
+                  checked={form.accommodation_type === opt.value}
+                  onChange={() => setForm(f => ({ ...f, accommodation_type: opt.value }))}
+                  style={{ width: 18, height: 18, accentColor: 'var(--accent)' }} />
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: form.accommodation_type === opt.value ? 'var(--accent)' : 'var(--text-primary)' }}>{opt.label}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{opt.desc}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+          {form.accommodation_type === 'hostel' && (
+            <div style={{ marginTop: 10, padding: '8px 14px', background: 'rgba(99,102,241,0.07)', borderRadius: 8, fontSize: 12, color: 'var(--accent)' }}>
+              ℹ️ This student will automatically appear in the Hostel module where fees and payments can be managed.
+            </div>
+          )}
+        </div>
+
+        {/* SECTION 6: Certificate Verification */}
         <div className="card" style={{ marginBottom: 16 }}>
           <h3 className="section-heading">📋 Certificate Verification</h3>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16, marginTop: -8 }}>
@@ -516,10 +680,12 @@ const StudentAdd: React.FC = () => {
           </div>
         </div>
 
-        {/* SECTION 6: Consent */}
+        {/* SECTION 7: Consent */}
         <div className="card" style={{ marginBottom: 16 }}>
           <h3 className="section-heading">📝 Consent</h3>
-          <div style={{ background: form.consent_given ? 'rgba(16,185,129,0.06)' : 'var(--bg-tertiary)', borderRadius: 10, padding: '16px 18px', border: `2px solid ${form.consent_given ? 'rgba(16,185,129,0.35)' : 'var(--border-light)'}`, transition: 'all 0.2s', marginBottom: form.consent_given ? 16 : 0 }}>
+
+          {/* Consent checkbox */}
+          <div style={{ background: form.consent_given ? 'rgba(16,185,129,0.06)' : 'var(--bg-tertiary)', borderRadius: 10, padding: '16px 18px', border: `2px solid ${form.consent_given ? 'rgba(16,185,129,0.35)' : 'var(--border-light)'}`, transition: 'all 0.2s', marginBottom: 16 }}>
             <label style={{ display: 'flex', alignItems: 'flex-start', gap: 14, cursor: 'pointer', userSelect: 'none' }}>
               <input type="checkbox" checked={form.consent_given} onChange={e => setForm(f => ({ ...f, consent_given: e.target.checked }))} style={{ width: 20, height: 20, accentColor: 'var(--teal)', cursor: 'pointer', marginTop: 3, flexShrink: 0 }} />
               <div>
@@ -531,23 +697,72 @@ const StudentAdd: React.FC = () => {
               </div>
             </label>
           </div>
-          {form.consent_given && (
-            <div style={{ background: 'var(--bg-tertiary)', borderRadius: 10, padding: '14px 16px', border: '1px solid var(--border-light)' }}>
-              <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
-                <FiImage size={14} /> Consent Signature / Document <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>(JPG only)</span>
-              </label>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => consentImgRef.current?.click()}>
-                <FiUpload size={12} /> {consentImageFile ? 'Change Image' : 'Upload Consent Image'}
+
+          {/* Three separate upload boxes */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+
+            {/* Box 1: Image Upload */}
+            <div style={{ background: 'var(--bg-tertiary)', borderRadius: 10, padding: '14px 16px', border: `2px dashed ${consentImageFile ? 'var(--teal)' : 'var(--border-light)'}`, transition: 'border-color 0.2s' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <FiImage size={18} style={{ color: 'var(--teal)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700 }}>Image Upload</span>
+                {consentImageFile && <FiCheckCircle size={14} style={{ color: 'var(--teal)', marginLeft: 'auto' }} />}
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>Signed consent photo / signature image</p>
+              <button type="button" className="btn btn-secondary btn-sm" style={{ width: '100%' }} onClick={() => consentImgRef.current?.click()}>
+                <FiUpload size={12} /> {consentImageFile ? 'Change Image' : 'Upload Image'}
               </button>
-              <input type="file" ref={consentImgRef} accept=".jpg,.jpeg" onChange={handleConsentImageChange} style={{ display: 'none' }} />
+              <input type="file" ref={consentImgRef} accept=".jpg,.jpeg,.png,.webp" onChange={handleConsentImageChange} style={{ display: 'none' }} />
               {consentImagePreview && (
-                <div style={{ marginTop: 12 }}>
-                  <img src={consentImagePreview} alt="consent" style={{ maxWidth: 220, maxHeight: 140, borderRadius: 8, border: '2px solid rgba(16,185,129,0.3)', objectFit: 'cover', display: 'block' }} />
-                  <div style={{ fontSize: 12, color: 'var(--teal)', marginTop: 6, fontWeight: 600 }}>✓ {consentImageFile?.name}</div>
+                <div style={{ marginTop: 10 }}>
+                  <img src={consentImagePreview} alt="consent" style={{ maxWidth: '100%', maxHeight: 100, borderRadius: 6, objectFit: 'cover', border: '2px solid rgba(16,185,129,0.3)' }} />
+                </div>
+              )}
+              {consentImageFile && (
+                <div style={{ fontSize: 11, color: 'var(--teal)', marginTop: 6, fontWeight: 600, wordBreak: 'break-all' }}>
+                  ✓ {consentImageFile.name}
                 </div>
               )}
             </div>
-          )}
+
+            {/* Box 2: PDF Document Upload */}
+            <div style={{ background: 'var(--bg-tertiary)', borderRadius: 10, padding: '14px 16px', border: `2px dashed ${consentPdfFile ? 'var(--accent)' : 'var(--border-light)'}`, transition: 'border-color 0.2s' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <FiFilePlus size={18} style={{ color: 'var(--accent)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700 }}>PDF Document</span>
+                {consentPdfFile && <FiCheckCircle size={14} style={{ color: 'var(--accent)', marginLeft: 'auto' }} />}
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>Consent form, agreement or letter (PDF)</p>
+              <button type="button" className="btn btn-secondary btn-sm" style={{ width: '100%' }} onClick={() => consentPdfRef.current?.click()}>
+                <FiUpload size={12} /> {consentPdfFile ? 'Change PDF' : 'Upload PDF'}
+              </button>
+              <input type="file" ref={consentPdfRef} accept=".pdf" onChange={handleConsentPdfChange} style={{ display: 'none' }} />
+              {consentPdfFile && (
+                <div style={{ fontSize: 11, color: 'var(--accent)', marginTop: 6, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, wordBreak: 'break-all' }}>
+                  <FiFileText size={12} /> {consentPdfFile.name}
+                </div>
+              )}
+            </div>
+
+            {/* Box 3: Video Upload */}
+            <div style={{ background: 'var(--bg-tertiary)', borderRadius: 10, padding: '14px 16px', border: `2px dashed ${consentVideoFile ? 'var(--amber)' : 'var(--border-light)'}`, transition: 'border-color 0.2s' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <FiVideo size={18} style={{ color: 'var(--amber)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700 }}>Video Upload</span>
+                {consentVideoFile && <FiCheckCircle size={14} style={{ color: 'var(--amber)', marginLeft: 'auto' }} />}
+              </div>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>Verbal consent video recording (MP4/MOV)</p>
+              <button type="button" className="btn btn-secondary btn-sm" style={{ width: '100%' }} onClick={() => consentVideoRef.current?.click()}>
+                <FiUpload size={12} /> {consentVideoFile ? 'Change Video' : 'Upload Video'}
+              </button>
+              <input type="file" ref={consentVideoRef} accept=".mp4,.mov,.webm,.mkv" onChange={handleConsentVideoChange} style={{ display: 'none' }} />
+              {consentVideoFile && (
+                <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 6, fontWeight: 600, wordBreak: 'break-all' }}>
+                  ✓ {consentVideoFile.name}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Submit */}

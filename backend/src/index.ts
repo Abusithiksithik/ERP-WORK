@@ -11,22 +11,23 @@ import { hashPassword } from './utils/bcrypt';
 dotenv.config();
 
 // Routes
-import authRoutes         from './routes/auth.routes';
-import usersRoutes        from './routes/users.routes';
-import studentsRoutes     from './routes/students.routes';
-import categoriesRoutes   from './routes/categories.routes';
-import coursesRoutes      from './routes/courses.routes';
-import batchesRoutes      from './routes/batches.routes';
-import modulesRoutes      from './routes/modules.routes';
-import videosRoutes       from './routes/videos.routes';
-import materialsRoutes    from './routes/materials.routes';
-import paymentMethodsRoutes from './routes/paymentMethods.routes';
-import paymentsRoutes     from './routes/payments.routes';
-import enrollmentsRoutes  from './routes/enrollments.routes';
-import attendanceRoutes   from './routes/attendance.routes';
-import dashboardRoutes    from './routes/dashboard.routes';
-import profileRoutes            from './routes/profile.routes';
-import studentMaterialsRoutes   from './routes/student_materials.routes';
+import authRoutes             from './routes/auth.routes';
+import usersRoutes            from './routes/users.routes';
+import studentsRoutes         from './routes/students.routes';
+import categoriesRoutes       from './routes/categories.routes';
+import coursesRoutes          from './routes/courses.routes';
+import batchesRoutes          from './routes/batches.routes';
+import modulesRoutes          from './routes/modules.routes';
+import videosRoutes           from './routes/videos.routes';
+import materialsRoutes        from './routes/materials.routes';
+import paymentMethodsRoutes   from './routes/paymentMethods.routes';
+import paymentsRoutes         from './routes/payments.routes';
+import enrollmentsRoutes      from './routes/enrollments.routes';
+import attendanceRoutes       from './routes/attendance.routes';
+import dashboardRoutes        from './routes/dashboard.routes';
+import profileRoutes          from './routes/profile.routes';
+import studentMaterialsRoutes from './routes/student_materials.routes';
+import hostelRoutes           from './routes/hostel.routes';
 
 const app  = express();
 const PORT = process.env.PORT || 5007;
@@ -34,7 +35,7 @@ const PORT = process.env.PORT || 5007;
 // Middleware
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(cors({
-  origin: '*',  // allow all origins — vite proxy handles it
+  origin: '*',
   credentials: true,
 }));
 app.use(morgan('dev'));
@@ -45,22 +46,23 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Routes
-app.use('/api/auth',           authRoutes);
-app.use('/api/users',          usersRoutes);
-app.use('/api/students',       studentsRoutes);
-app.use('/api/categories',     categoriesRoutes);
-app.use('/api/courses',        coursesRoutes);
-app.use('/api/batches',        batchesRoutes);
-app.use('/api/modules',        modulesRoutes);
-app.use('/api/videos',         videosRoutes);
-app.use('/api/materials',      materialsRoutes);
-app.use('/api/payment-methods', paymentMethodsRoutes);
-app.use('/api/payments',       paymentsRoutes);
-app.use('/api/enrollments',    enrollmentsRoutes);
-app.use('/api/attendance',     attendanceRoutes);
-app.use('/api/dashboard',      dashboardRoutes);
-app.use('/api/profile',          profileRoutes);
+app.use('/api/auth',              authRoutes);
+app.use('/api/users',             usersRoutes);
+app.use('/api/students',          studentsRoutes);
+app.use('/api/categories',        categoriesRoutes);
+app.use('/api/courses',           coursesRoutes);
+app.use('/api/batches',           batchesRoutes);
+app.use('/api/modules',           modulesRoutes);
+app.use('/api/videos',            videosRoutes);
+app.use('/api/materials',         materialsRoutes);
+app.use('/api/payment-methods',   paymentMethodsRoutes);
+app.use('/api/payments',          paymentsRoutes);
+app.use('/api/enrollments',       enrollmentsRoutes);
+app.use('/api/attendance',        attendanceRoutes);
+app.use('/api/dashboard',         dashboardRoutes);
+app.use('/api/profile',           profileRoutes);
 app.use('/api/student-materials', studentMaterialsRoutes);
+app.use('/api/hostel',            hostelRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -78,8 +80,46 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ success: false, message: err.message || 'Internal Server Error' });
 });
 
-// ── DB Init ─────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Migration runner
+// Runs a named migration inside a transaction.
+// Records success in schema_migrations. On failure: rolls back, does NOT record.
+// ─────────────────────────────────────────────────────────────────────────────
+async function runMigration(name: string, sql: string): Promise<void> {
+  // Check if already applied
+  const check = await pool.query(
+    'SELECT 1 FROM schema_migrations WHERE migration_name = $1',
+    [name]
+  );
+  if (check.rows.length > 0) {
+    console.log(`⏭️  Migration ${name} already applied — skipping`);
+    return;
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(sql);
+    await client.query(
+      'INSERT INTO schema_migrations (migration_name, applied_at) VALUES ($1, NOW())',
+      [name]
+    );
+    await client.query('COMMIT');
+    console.log(`✅ Migration ${name} applied`);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(`❌ Migration ${name} FAILED — rolled back. Will retry on next start.`, err);
+    // Do not re-throw: allow other migrations and startup to continue
+  } finally {
+    client.release();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DB Init
+// ─────────────────────────────────────────────────────────────────────────────
 const initDb = async () => {
+  // ── 1. Wait for PostgreSQL ───────────────────────────────────────────────
   const maxRetries = 10;
   let retries = 0;
   while (retries < maxRetries) {
@@ -94,49 +134,62 @@ const initDb = async () => {
     }
   }
 
-  // Run schema (CREATE TABLE IF NOT EXISTS — safe)
+  // ── 2. Base schema (always run — fully idempotent: IF NOT EXISTS everywhere) ──
   try {
     const schemaPath = path.join(__dirname, '../../database/schema.sql');
     if (fs.existsSync(schemaPath)) {
       const schema = fs.readFileSync(schemaPath, 'utf8');
       await pool.query(schema);
-      console.log('✅ Schema applied');
+      console.log('✅ Base schema applied');
     }
   } catch (err) {
-    console.error('Schema error:', err);
+    console.error('❌ Base schema error:', err);
   }
 
-  // Run V2 migration (guardian_type, student_materials, master courses, etc.)
+  // ── 3. Ensure schema_migrations tracking table exists ───────────────────
+  // This must happen AFTER schema.sql so update_updated_at_column() exists.
+  // It must happen BEFORE any runMigration() call.
   try {
-    const migV2Path = path.join(__dirname, '../../database/migrate_v2.sql');
-    if (fs.existsSync(migV2Path)) {
-      const migV2 = fs.readFileSync(migV2Path, 'utf8');
-      await pool.query(migV2);
-      console.log('✅ Migration V2 applied');
-    }
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        migration_name VARCHAR(200) PRIMARY KEY,
+        applied_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    console.log('✅ schema_migrations table ready');
   } catch (err) {
-    console.error('Migration V2 error:', err);
+    console.error('❌ Failed to create schema_migrations table:', err);
+    // Cannot safely proceed with tracked migrations — abort init
+    return;
   }
 
-  // Run sample seed (idempotent — safe to run every time)
-  try {
-    const seedPath = path.join(__dirname, '../../database/seed_sample.sql');
-    if (fs.existsSync(seedPath)) {
-      const seed = fs.readFileSync(seedPath, 'utf8');
-      await pool.query(seed);
-      console.log('✅ Sample data seeded');
+  // ── 4. Versioned migrations (tracked — run each exactly once) ────────────
+  const migrations: Array<{ name: string; file: string }> = [
+    { name: 'migrate_v2', file: 'migrate_v2.sql' },
+    { name: 'migrate_v3', file: 'migrate_v3.sql' },
+    { name: 'migrate_v4', file: 'migrate_v4.sql' },
+    { name: 'migrate_v5', file: 'migrate_v5.sql' },
+  ];
+
+  for (const m of migrations) {
+    try {
+      const filePath = path.join(__dirname, '../../database', m.file);
+      if (!fs.existsSync(filePath)) {
+        console.log(`⚠️  Migration file ${m.file} not found — skipping`);
+        continue;
+      }
+      const sql = fs.readFileSync(filePath, 'utf8');
+      await runMigration(m.name, sql);
+    } catch (err) {
+      console.error(`❌ Unexpected error preparing migration ${m.name}:`, err);
     }
-  } catch (err) {
-    console.error('Sample seed error:', err);
   }
 
-  // Seed: generate hash HERE on this server so bcryptjs version matches
+  // ── 5. Seed default users (idempotent — ON CONFLICT DO UPDATE) ───────────
+  // This runs every start to keep default accounts in sync.
+  // It only touches the four known emails; all client data is untouched.
   try {
-    // Generate password hash on this server
     const hash = await hashPassword('Admin@123');
-    console.log('✅ Generated password hash for Admin@123');
-
-    // Upsert all default accounts
     await pool.query(`
       INSERT INTO users (full_name, email, password_hash, role, is_active)
       VALUES
@@ -151,7 +204,19 @@ const initDb = async () => {
     `, [hash]);
     console.log('✅ Default users seeded (password: Admin@123)');
   } catch (err) {
-    console.error('Seed error:', err);
+    console.error('❌ Default user seed error:', err);
+  }
+
+  // ── 6. Sample seed (idempotent — ON CONFLICT DO NOTHING) ─────────────────
+  try {
+    const seedPath = path.join(__dirname, '../../database/seed_sample.sql');
+    if (fs.existsSync(seedPath)) {
+      const seed = fs.readFileSync(seedPath, 'utf8');
+      await pool.query(seed);
+      console.log('✅ Sample data seeded');
+    }
+  } catch (err) {
+    console.error('❌ Sample seed error:', err);
   }
 };
 

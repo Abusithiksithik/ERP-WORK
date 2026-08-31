@@ -1,16 +1,21 @@
 import React, { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   FiHome, FiUsers, FiVideo, FiUser, FiLogOut, FiMenu, FiX, FiUserCheck,
   FiCreditCard, FiCalendar, FiAlertCircle, FiUserX, FiDollarSign, FiSettings,
+  FiBookOpen, FiLayers, FiChevronDown, FiChevronRight,
 } from 'react-icons/fi';
 
 const Layout: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const settingsSubPaths = ['/courses', '/batches', '/payment-methods', '/users'];
+  const isOnSettingsRoute = settingsSubPaths.some(p => location.pathname.startsWith(p));
+  const [settingsOpen, setSettingsOpen] = useState(isOnSettingsRoute);
 
   const role = user?.role || '';
   const isAdmin    = role === 'super_admin' || role === 'admin';
@@ -31,53 +36,48 @@ const Layout: React.FC = () => {
     teacher:     '#10b981',
   };
 
-  // ── Nav order as specified ─────────────────────────────────
-  // Students, Enrollment, Attendance, Videos, Payment Method,
-  // Discontinue, User, Profile, Dashboard
+  // Settings sub-items (Courses, Batches, Payment Methods) — Admin only
+  const settingsSubItems = [
+    { to: '/courses',         icon: <FiBookOpen />, label: 'Courses'         },
+    { to: '/batches',         icon: <FiLayers />,   label: 'Batches'         },
+    { to: '/payment-methods', icon: <FiDollarSign />, label: 'Payment Methods' },
+    { to: '/users',           icon: <FiSettings />,  label: 'Users'           },
+  ];
+
+  const isSettingsActive = settingsSubItems.some(item => location.pathname.startsWith(item.to));
+
+  // Main nav items (without items moved to Settings)
   const navItems = [
     {
       to: '/students', icon: <FiUsers />, label: 'Students',
-      // Admin: full CRUD | Incharge: view only | Teacher: view only
       show: isAdmin || isIncharge || isTeacher,
     },
     {
       to: '/enrollments', icon: <FiUserCheck />, label: 'Enrollment',
-      // Admin: full CRUD | Incharge: view + approve | Teacher: no access
       show: isAdmin || isIncharge,
     },
     {
       to: '/attendance', icon: <FiCalendar />, label: 'Attendance',
-      // Admin: full | Incharge: view + mark | Teacher: mark + view own batches
       show: isAdmin || isIncharge || isTeacher,
     },
     {
       to: '/videos', icon: <FiVideo />, label: 'Videos',
-      // Admin: full CRUD | Teacher: upload + manage own | Incharge: no access
       show: isAdmin || isTeacher,
     },
     {
-      to: '/payment-methods', icon: <FiDollarSign />, label: 'Payment Method',
-      // Admin only
+      to: '/hostel', icon: <FiHome />, label: 'Hostel',
       show: isAdmin,
     },
     {
       to: '/discontinued-students', icon: <FiUserX />, label: 'Discontinue',
-      // Admin only
-      show: isAdmin,
-    },
-    {
-      to: '/users', icon: <FiSettings />, label: 'User',
-      // Admin only
       show: isAdmin,
     },
     {
       to: '/profile', icon: <FiUser />, label: 'Profile',
-      // All roles
       show: true,
     },
     {
-      to: '/', icon: <FiHome />, label: 'Dashboard',
-      // All roles
+      to: '/dashboard', icon: <FiHome />, label: 'Dashboard',
       show: true,
     },
   ].filter(item => item.show);
@@ -136,6 +136,62 @@ const Layout: React.FC = () => {
               {sidebarOpen && <span className="nav-label">{item.label}</span>}
             </NavLink>
           ))}
+
+          {/* ── Settings / Master Data section (Admin only) ── */}
+          {isAdmin && (
+            <>
+              {sidebarOpen ? (
+                /* Expanded: collapsible group */
+                <div>
+                  <button
+                    onClick={() => setSettingsOpen(o => !o)}
+                    className={`nav-item ${isSettingsActive ? 'active' : ''}`}
+                    style={{
+                      width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: '10px 16px', borderRadius: 10,
+                      color: isSettingsActive ? 'var(--accent)' : 'var(--text-secondary)',
+                      fontWeight: isSettingsActive ? 700 : 500, fontSize: 14,
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <span className="nav-icon"><FiSettings /></span>
+                    <span className="nav-label" style={{ flex: 1, textAlign: 'left' }}>Settings</span>
+                    <span style={{ fontSize: 12, opacity: 0.7 }}>
+                      {settingsOpen ? <FiChevronDown /> : <FiChevronRight />}
+                    </span>
+                  </button>
+
+                  {settingsOpen && (
+                    <div style={{ paddingLeft: 16, marginTop: 2 }}>
+                      {settingsSubItems.map(sub => (
+                        <NavLink
+                          key={sub.to}
+                          to={sub.to}
+                          className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
+                          style={{ paddingLeft: 14, fontSize: 13 }}
+                        >
+                          <span className="nav-icon" style={{ fontSize: 14 }}>{sub.icon}</span>
+                          <span className="nav-label">{sub.label}</span>
+                        </NavLink>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Collapsed sidebar: show just the Settings icon (tooltip via title) */
+                <NavLink
+                  to="/users"
+                  className={({ isActive }) =>
+                    `nav-item ${isActive || isSettingsActive ? 'active' : ''}`
+                  }
+                  title="Settings"
+                >
+                  <span className="nav-icon"><FiSettings /></span>
+                </NavLink>
+              )}
+            </>
+          )}
         </nav>
 
         <div className="sidebar-footer">

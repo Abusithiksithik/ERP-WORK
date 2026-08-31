@@ -97,6 +97,7 @@ router.put('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge')
       res.status(400).json({ success: false, message: `Status must be one of: ${validStatuses.join(', ')}` });
       return;
     }
+    // Update student_uniform table
     const result = await query(
       `INSERT INTO student_uniform (student_id, status, notes, updated_by, updated_at)
        VALUES ($1, $2, $3, $4, NOW())
@@ -108,6 +109,12 @@ router.put('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge')
        RETURNING *`,
       [req.params.student_id, status, notes || null, req.user!.id]
     );
+    // Sync to students.uniform_received (single source of truth)
+    await query(
+      `UPDATE students SET uniform_received = $1 WHERE id = $2`,
+      [status === 'received', req.params.student_id]
+    ).catch(() => { /* non-critical */ });
+
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     console.error('PUT /student-materials/uniform error:', err);

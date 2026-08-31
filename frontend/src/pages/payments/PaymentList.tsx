@@ -262,7 +262,7 @@ const PaymentList: React.FC = () => {
                       {fmt(p.amount)}
                     </td>
                     <td style={{ textTransform: 'capitalize', fontSize: 13 }}>{p.method_type || '—'}</td>
-                    <td style={{ fontSize: 13 }}>{new Date(p.payment_date).toLocaleDateString()}</td>
+                    <td style={{ fontSize: 13 }}>{new Date(p.payment_date).toLocaleDateString('en-GB')}</td>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.transaction_reference || '—'}</td>
                     <td><span className={`badge badge-${p.status}`}>{p.status}</span></td>
                     {isAdmin && (

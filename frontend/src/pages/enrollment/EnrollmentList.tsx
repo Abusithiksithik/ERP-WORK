@@ -48,6 +48,7 @@ const EnrollmentList: React.FC = () => {
 
   const [enrollForm, setEnrollForm] = useState({
     student_id: '', course_id: '', batch_id: '', notes: '',
+    category_id: '',  // master course filter
     admission_date: new Date().toISOString().split('T')[0],
     course_fee: '', hostel_fee: '', uniform_fee: '', materials_fee: '',
   });
@@ -397,7 +398,7 @@ const EnrollmentList: React.FC = () => {
         <div style={{ display: 'flex', gap: 10 }}>
           {activeTab === 'enrollments' && isAdmin && (
             <button className="btn btn-primary" onClick={() => {
-              setEnrollForm({ student_id: '', course_id: '', batch_id: '', notes: '', admission_date: new Date().toISOString().split('T')[0], course_fee: '', hostel_fee: '', uniform_fee: '', materials_fee: '' });
+              setEnrollForm({ student_id: '', course_id: '', batch_id: '', notes: '', category_id: '', admission_date: new Date().toISOString().split('T')[0], course_fee: '', hostel_fee: '', uniform_fee: '', materials_fee: '' });
               setEnrollFilteredBatches([]);
               setShowEnrollModal(true);
             }}>
@@ -768,29 +769,47 @@ const EnrollmentList: React.FC = () => {
                   {students.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.student_id})</option>)}
                 </select>
               </div>
+              {/* Master Course filter */}
               <div className="form-group">
-                <label className="form-label">Course *</label>
+                <label className="form-label">Master Course</label>
+                <select className="form-control" value={enrollForm.category_id || ''}
+                  onChange={e => {
+                    setEnrollForm(p => ({ ...p, category_id: e.target.value, course_id: '', batch_id: '' }));
+                    setEnrollFilteredBatches([]);
+                  }}>
+                  <option value="">— All Master Courses —</option>
+                  {categories.filter(c => c.status === 'active').map(c => (
+                    <option key={c.id} value={c.id}>{c.category_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Sub-Course *</label>
                 <select className="form-control" value={enrollForm.course_id} onChange={e => handleEnrollCourseChange(e.target.value)} required>
-                  <option value="">Select Course</option>
-                  {courses.map(c => (
+                  <option value="">Select Sub-Course</option>
+                  {(enrollForm.category_id
+                    ? courses.filter(c => String(c.category_id) === enrollForm.category_id)
+                    : courses
+                  ).map(c => (
                     <option key={c.id} value={c.id}>
                       {c.course_name}
-                      {c.category_name ? ` [${c.category_name}]` : ''}
                       {c.fee_amount ? ` — ${fmt(c.fee_amount)}` : ''}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="form-group">
-                <label className="form-label">Batch</label>
+                <label className="form-label">Batch Year</label>
                 <select className="form-control" value={enrollForm.batch_id} onChange={setE('batch_id')} disabled={!enrollForm.course_id}>
-                  <option value="">{enrollForm.course_id ? 'Select Batch (optional)' : '— select course first —'}</option>
+                  <option value="">{enrollForm.course_id ? 'Select Batch Year (optional)' : '— select sub-course first —'}</option>
                   {enrollFilteredBatches.map(b => <option key={b.id} value={b.id}>{b.batch_name}</option>)}
                 </select>
               </div>
               <div className="form-group">
                 <label className="form-label">Admission Date</label>
-                <input type="date" className="form-control" value={enrollForm.admission_date} onChange={setE('admission_date')} />
+                <div className="date-field-wrap" data-format="DD/MM/YYYY">
+                  <input type="date" className="form-control" value={enrollForm.admission_date} onChange={setE('admission_date')} />
+                </div>
               </div>
 
               {/* Fee breakdown */}

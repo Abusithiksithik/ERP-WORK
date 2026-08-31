@@ -18,7 +18,7 @@ const LoginPage: React.FC = () => {
     setLoading(true);
     try {
       await login(email.trim(), password);
-      navigate('/');
+      navigate('/students');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Invalid email or password.');
     } finally {

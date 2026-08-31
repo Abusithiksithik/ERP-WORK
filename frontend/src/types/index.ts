@@ -27,10 +27,16 @@ export interface Student {
   photo_url?: string;
   course_id?: number;
   batch_id?: number;
-  course_name?: string;
+  course_name?: string;        // sub-course name (e.g. DOT, DMLT)
+  master_course_name?: string; // master category (e.g. IMA, TNSCVT)
   batch_name?: string;
+  batch_start_date?: string;
+  batch_end_date?: string;
   category_name?: string;
+  course_is_free?: boolean;
   admission_date: string;
+  course_completion_date?: string; // auto-calc for FREE courses
+  uniform_received?: boolean;      // single source of truth
   status: 'active' | 'inactive' | 'suspended' | 'discontinued';
   discontinued_at?: string;
   discontinued_reason?: string;
@@ -40,6 +46,7 @@ export interface Student {
   cert_10th_url?: string;
   cert_12th_url?: string;
   cert_diploma_url?: string;
+  accommodation_type?: 'day_scholar' | 'hostel';
   created_at: string;
 }
 
@@ -74,6 +81,8 @@ export interface Batch {
   category_name?: string;
   start_date?: string;
   end_date?: string;
+  start_year?: number;
+  end_year?: number;
   status: 'active' | 'inactive' | 'completed';
   student_count?: number;
 }

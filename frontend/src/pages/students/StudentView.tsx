@@ -12,7 +12,11 @@ import { useAuth } from '../../context/AuthContext';
 
 const fmt = (n: number | string) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const fmtDate = (d: string) => {
-  try { return new Date(d).toLocaleDateString('en-IN'); } catch { return d; }
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return d;
+    return dt.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  } catch { return d; }
 };
 
 interface StudentMaterial {
@@ -395,19 +399,26 @@ const StudentView: React.FC = () => {
                   <div key={enr.id} style={{ background: 'var(--bg-tertiary)', borderRadius: 12, padding: '14px 16px', border: '1px solid var(--border-light)' }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 8 }}>
                       <div>
-                        {enr.category_name && (
+                        {/* Master Course badge */}
+                        {(enr.category_name || (student as any).master_course_name) && (
                           <span style={{ fontSize: 11, background: 'rgba(99,102,241,0.1)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 10, fontWeight: 700, display: 'inline-block', marginBottom: 4 }}>
-                            {enr.category_name}
+                            {enr.category_name || (student as any).master_course_name}
                           </span>
                         )}
+                        {/* Sub-course */}
                         <div style={{ fontWeight: 700, fontSize: 15 }}>{enr.course_name}</div>
-                        {enr.batch_name && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>📅 {enr.batch_name}</div>}
+                        {/* Batch year */}
+                        {enr.batch_name && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>📅 Batch: {enr.batch_name}</div>}
+                        {/* FREE course completion */}
+                        {(student as any).course_is_free && (student as any).course_completion_date && (
+                          <div style={{ fontSize: 12, color: 'var(--teal)', marginTop: 4, fontWeight: 600 }}>
+                            🎓 Completion: {fmtDate((student as any).course_completion_date)} (3 months from joining)
+                          </div>
+                        )}
                       </div>
                       <span className={`badge badge-${enr.status}`}>{enr.status}</span>
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      Enrolled: {fmtDate(enr.enrolled_at)}
-                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Enrolled: {fmtDate(enr.enrolled_at)}</div>
                     {enr.notes && (
                       <div style={{ marginTop: 8, fontSize: 12, color: 'var(--amber)', background: 'rgba(245,158,11,0.06)', borderRadius: 6, padding: '6px 10px', border: '1px solid rgba(245,158,11,0.15)' }}>
                         📋 {enr.notes}
@@ -415,6 +426,21 @@ const StudentView: React.FC = () => {
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Uniform status (from student record) */}
+            {student && (
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>👕 Uniform</div>
+                <div>
+                  <span className={`uni-badge uni-badge--${student.uniform_received ? 'received' : 'not_received'}`}>
+                    {student.uniform_received ? '✅ Received' : '❌ Not Received'}
+                  </span>
+                  {isAdmin && (
+                    <button className="btn btn-sm btn-secondary" style={{ marginLeft: 10 }} onClick={openUniformModal}>Update</button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -496,6 +522,45 @@ const StudentView: React.FC = () => {
               </div>
             )}
           </div>
+
+          {/* ── Consent Section ── */}
+          {((student as any).consent_given || (student as any).consent_image_url || (student as any).consent_pdf_url || (student as any).consent_video_url) && (
+            <div className="card">
+              <h3 className="section-heading">📝 Consent</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, padding: '10px 14px', borderRadius: 8, background: (student as any).consent_given ? 'rgba(16,185,129,0.06)' : 'var(--bg-tertiary)', border: `1px solid ${(student as any).consent_given ? 'rgba(16,185,129,0.25)' : 'var(--border-light)'}` }}>
+                <span style={{ fontSize: 18 }}>{(student as any).consent_given ? '✅' : '⬜'}</span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>{(student as any).consent_given ? 'Consent Given' : 'Consent Not Yet Given'}</div>
+                  <div style={{ fontSize: 12, color: (student as any).consent_given ? 'var(--teal)' : 'var(--text-muted)' }}>
+                    {(student as any).consent_given ? 'Student / guardian has given formal consent' : 'No consent recorded'}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+                {/* Image */}
+                <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--teal)', marginBottom: 8 }}>🖼 Consent Image</div>
+                  {(student as any).consent_image_url
+                    ? <a href={(student as any).consent_image_url} target="_blank" rel="noreferrer"><img src={(student as any).consent_image_url} alt="consent" style={{ maxWidth: '100%', maxHeight: 80, borderRadius: 6, objectFit: 'cover', border: '2px solid rgba(16,185,129,0.3)' }} /></a>
+                    : <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>No image uploaded</div>}
+                </div>
+                {/* PDF */}
+                <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', marginBottom: 8 }}>📄 Consent PDF</div>
+                  {(student as any).consent_pdf_url
+                    ? <a href={(student as any).consent_pdf_url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 4 }}>📄 View PDF Document</a>
+                    : <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>No PDF uploaded</div>}
+                </div>
+                {/* Video */}
+                <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--amber)', marginBottom: 8 }}>🎬 Consent Video</div>
+                  {(student as any).consent_video_url
+                    ? <a href={(student as any).consent_video_url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: 'var(--amber)', display: 'flex', alignItems: 'center', gap: 4 }}>🎬 View Video Recording</a>
+                    : <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>No video uploaded</div>}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── Materials Section ── */}
           <div className="card">

@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import { pool, query } from '../config/db';
 import { generateStudentId } from '../utils/studentId';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
-import { uploadPhoto, uploadCertificate } from '../middleware/upload';
+import { uploadPhoto, uploadCertificate, uploadConsentImage, uploadConsentPdf, uploadConsentVideo } from '../middleware/upload';
 import { stringify } from 'csv-stringify/sync';
 
 const router = Router();
@@ -36,7 +36,7 @@ router.get('/', authorize('super_admin', 'admin', 'incharge', 'teacher'), async 
              FROM students s
              LEFT JOIN courses c ON c.id = s.course_id
              LEFT JOIN batches b ON b.id = s.batch_id
-             WHERE s.status != 'discontinued'`;
+             WHERE 1=1`;
     const params: unknown[] = [];
     if (search) {
       params.push(`%${search}%`);
@@ -45,6 +45,7 @@ router.get('/', authorize('super_admin', 'admin', 'incharge', 'teacher'), async 
     if (course_id) { params.push(course_id); q += ` AND s.course_id=$${params.length}`; }
     if (batch_id)  { params.push(batch_id);  q += ` AND s.batch_id=$${params.length}`;  }
     if (status)    { params.push(status);    q += ` AND s.status=$${params.length}`;    }
+    else           { q += " AND s.status != 'discontinued'"; }
 
     const countResult = await query(`SELECT COUNT(*) FROM (${q}) AS t`, params);
     const total = parseInt(countResult.rows[0].count);
@@ -144,9 +145,23 @@ router.get('/:id/discontinue-details', authorize('super_admin', 'admin'), async 
     const courseFee  = parseFloat(student.fee_amount || '0');
     const pendingDues = Math.max(0, courseFee - totalPaid);
 
+    // Build feeCategories from enrollments for the discontinue modal breakdown
+    const feeCategories = enrollmentsRes.rows.map((e: any) => {
+      const enrollPaid = verifiedPayments
+        .filter((p: any) => p.enrollment_id === e.id)
+        .reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
+      const actual = parseFloat(e.course_fee || '0');
+      return {
+        name: e.course_name || 'Course Fee',
+        actual,
+        paid: enrollPaid,
+        remaining: Math.max(0, actual - enrollPaid),
+      };
+    });
+
     res.json({
       success: true,
-      data: { student, enrollments: enrollmentsRes.rows, payments: paymentsRes.rows, totalPaid, courseFee, pendingDues },
+      data: { student, enrollments: enrollmentsRes.rows, payments: paymentsRes.rows, totalPaid, courseFee, pendingDues, feeCategories },
     });
   } catch (err) {
     console.error(err);
@@ -187,18 +202,33 @@ router.post('/:id/discontinue', authorize('super_admin', 'admin'), async (req: A
         }
       }
     }
-    const result = await query(
-      `UPDATE students
-       SET status='discontinued', discontinued_at=NOW(), discontinued_reason=$1,
-           disc_cert_10th=$2, disc_cert_12th=$3, disc_cert_diploma=$4
-       WHERE id=$5 RETURNING *`,
-      [reason || null,
-       disc_cert_10th === true || disc_cert_10th === 'true',
-       disc_cert_12th === true || disc_cert_12th === 'true',
-       disc_cert_diploma === true || disc_cert_diploma === 'true',
-       req.params.id]
-    );
-    res.json({ success: true, data: result.rows[0], message: 'Student discontinued successfully' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `UPDATE students
+         SET status='discontinued', discontinued_at=NOW(), discontinued_reason=$1,
+             disc_cert_10th=$2, disc_cert_12th=$3, disc_cert_diploma=$4
+         WHERE id=$5 RETURNING *`,
+        [reason || null,
+         disc_cert_10th === true || disc_cert_10th === 'true',
+         disc_cert_12th === true || disc_cert_12th === 'true',
+         disc_cert_diploma === true || disc_cert_diploma === 'true',
+         req.params.id]
+      );
+      // Mark enrollments as discontinued too
+      await client.query(
+        `UPDATE enrollments SET status='discontinued' WHERE student_id=$1 AND status='approved'`,
+        [req.params.id]
+      );
+      await client.query('COMMIT');
+      res.json({ success: true, data: result.rows[0], message: 'Student discontinued successfully' });
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -217,11 +247,29 @@ router.post('/:id/restore', authorize('super_admin', 'admin'), async (req: AuthR
       res.status(400).json({ success: false, message: 'Student is not discontinued' });
       return;
     }
-    const result = await query(
-      `UPDATE students SET status='active', discontinued_at=NULL, discontinued_reason=NULL WHERE id=$1 RETURNING *`,
-      [req.params.id]
-    );
-    res.json({ success: true, data: result.rows[0], message: 'Student restored successfully' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `UPDATE students
+         SET status='active', discontinued_at=NULL, discontinued_reason=NULL,
+             disc_cert_10th=false, disc_cert_12th=false, disc_cert_diploma=false
+         WHERE id=$1 RETURNING *`,
+        [req.params.id]
+      );
+      // Restore enrollments that were discontinued with this student
+      await client.query(
+        `UPDATE enrollments SET status='approved' WHERE student_id=$1 AND status='discontinued'`,
+        [req.params.id]
+      );
+      await client.query('COMMIT');
+      res.json({ success: true, data: result.rows[0], message: 'Student restored successfully' });
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -232,10 +280,14 @@ router.post('/:id/restore', authorize('super_admin', 'admin'), async (req: AuthR
 router.get('/:id', authorize('super_admin', 'admin', 'incharge', 'teacher', 'student'), async (req: AuthRequest, res: Response) => {
   try {
     const result = await query(
-      `SELECT s.*, c.course_name, c.fee_amount AS course_fee_amount, b.batch_name
+      `SELECT s.*,
+              c.course_name, c.fee_amount AS course_fee_amount, c.is_free AS course_is_free,
+              cc.category_name AS master_course_name,
+              b.batch_name, b.start_date AS batch_start_date, b.end_date AS batch_end_date
        FROM students s
-       LEFT JOIN courses c ON c.id = s.course_id
-       LEFT JOIN batches b ON b.id = s.batch_id
+       LEFT JOIN courses c  ON c.id  = s.course_id
+       LEFT JOIN course_categories cc ON cc.id = c.category_id
+       LEFT JOIN batches b  ON b.id  = s.batch_id
        WHERE s.id=$1`, [req.params.id]
     );
     if (result.rows.length === 0) {
@@ -260,8 +312,10 @@ router.post('/', authorize('super_admin', 'admin'), uploadPhoto.single('photo'),
       parent_name, parent_mobile, parent_present, guardian_type,
       course_id, batch_id, admission_date, status,
       cert_10th_collected, cert_12th_collected, cert_diploma_collected,
+      consent_given,
       initial_payment, payment_method, payment_type_label,
       internship_monthly, internship_months,
+      accommodation_type,
     } = req.body;
 
     // ── 1. Validate inputs ──
@@ -304,17 +358,35 @@ router.post('/', authorize('super_admin', 'admin'), uploadPhoto.single('photo'),
     const certDip = cert_diploma_collected === 'true' || cert_diploma_collected === true;
 
     // ── 4. Create student record ──
+    // Auto-calculate completion date for FREE courses (admission_date + 3 months)
+    let courseCompletionDate: string | null = null;
+    if (course_id) {
+      const courseCheck = await client.query('SELECT is_free FROM courses WHERE id=$1', [course_id]);
+      if (courseCheck.rows.length > 0 && courseCheck.rows[0].is_free) {
+        const startDate = new Date(admission_date || new Date().toISOString().split('T')[0]);
+        startDate.setMonth(startDate.getMonth() + 3);
+        courseCompletionDate = startDate.toISOString().split('T')[0];
+      }
+    }
+
+    const consentGiven = consent_given === 'true' || consent_given === true;
+
+    const accommodationType = accommodation_type === 'hostel' ? 'hostel' : 'day_scholar';
+
     const studentResult = await client.query(
       `INSERT INTO students (
          student_id, full_name, mobile, email, date_of_birth, gender,
          address, parent_name, parent_mobile, parent_present, guardian_type,
          photo_url, course_id, batch_id, admission_date, status,
-         cert_10th_collected, cert_12th_collected, cert_diploma_collected
+         cert_10th_collected, cert_12th_collected, cert_diploma_collected,
+         consent_given,
+         uniform_received, course_completion_date, accommodation_type
        ) VALUES (
          $1,  $2,  $3,  $4,  $5,  $6,
          $7,  $8,  $9,  $10, $11,
          $12, $13, $14, $15, $16,
-         $17, $18, $19
+         $17, $18, $19, $20,
+         $21, $22, $23
        ) RETURNING *`,
       [
         student_id,
@@ -336,6 +408,10 @@ router.post('/', authorize('super_admin', 'admin'), uploadPhoto.single('photo'),
         cert10,
         cert12,
         certDip,
+        consentGiven,
+        false,
+        courseCompletionDate,
+        accommodationType,
       ]
     );
     const newStudent = studentResult.rows[0];
@@ -412,7 +488,17 @@ router.post('/', authorize('super_admin', 'admin'), uploadPhoto.single('photo'),
       );
     }
 
-    // ── 8. Commit ──
+    // ── 8. Auto-create hostel record if accommodation is hostel ──
+    if (accommodationType === 'hostel') {
+      await client.query(
+        `INSERT INTO hostel_records (student_id, hostel_fee, mess_fee, paid_amount)
+         VALUES ($1, 0, 0, 0)
+         ON CONFLICT (student_id) DO NOTHING`,
+        [newStudent.id]
+      );
+    }
+
+    // ── 9. Commit ──
     await client.query('COMMIT');
 
     res.status(201).json({ success: true, data: newStudent });
@@ -471,14 +557,20 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
     const cert10  = cert_10th_collected  === 'true' || cert_10th_collected  === true;
     const cert12  = cert_12th_collected  === 'true' || cert_12th_collected  === true;
     const certDip = cert_diploma_collected === 'true' || cert_diploma_collected === true;
+    const uniformReceived = (req.body as any).uniform_received === 'true' || (req.body as any).uniform_received === true;
+
+    const consentGiven = (req.body as any).consent_given === 'true' || (req.body as any).consent_given === true;
+
+    const newAccommodationType = (req.body as any).accommodation_type === 'hostel' ? 'hostel' : 'day_scholar';
 
     const result = await query(
       `UPDATE students
        SET full_name=$1, mobile=$2, email=$3, date_of_birth=$4, gender=$5,
            address=$6, parent_name=$7, parent_mobile=$8, guardian_type=$9,
            parent_present=$10, photo_url=$11, status=$12,
-           cert_10th_collected=$13, cert_12th_collected=$14, cert_diploma_collected=$15
-       WHERE id=$16 RETURNING *`,
+           cert_10th_collected=$13, cert_12th_collected=$14, cert_diploma_collected=$15,
+           uniform_received=$16, consent_given=$17, accommodation_type=$18
+       WHERE id=$19 RETURNING *`,
       [
         String(full_name).trim(), String(mobile).trim(), emailNorm,
         date_of_birth || null, gender || null,
@@ -488,9 +580,34 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
         photo_url,
         status || 'active',
         cert10, cert12, certDip,
+        uniformReceived,
+        consentGiven,
+        newAccommodationType,
         req.params.id,
       ]
     );
+
+    // Auto-manage hostel_record based on accommodation change
+    if (newAccommodationType === 'hostel') {
+      await query(
+        `INSERT INTO hostel_records (student_id, hostel_fee, mess_fee, paid_amount)
+         VALUES ($1, 0, 0, 0)
+         ON CONFLICT (student_id) DO NOTHING`,
+        [req.params.id]
+      ).catch(() => {/* non-critical */});
+    }
+
+    // Sync uniform status to student_uniform table for cross-page sync
+    await query(
+      `INSERT INTO student_uniform (student_id, status, updated_by, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (student_id) DO UPDATE
+         SET status = EXCLUDED.status,
+             updated_by = EXCLUDED.updated_by,
+             updated_at = NOW()`,
+      [req.params.id, uniformReceived ? 'received' : 'not_received', req.user!.id]
+    ).catch(() => { /* non-critical */ });
+
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     console.error('PUT /students/:id error:', err);
@@ -510,8 +627,30 @@ router.delete('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest
       res.status(400).json({ success: false, message: 'Only discontinued students can be permanently deleted' });
       return;
     }
-    await query('DELETE FROM students WHERE id=$1', [req.params.id]);
-    res.json({ success: true, message: `Student "${existing.rows[0].full_name}" permanently deleted` });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const sid = req.params.id;
+      // Delete child records in FK-safe order (CASCADE handles most, explicit for safety)
+      await client.query('DELETE FROM attendance WHERE student_id=$1', [sid]);
+      await client.query('DELETE FROM payments WHERE student_id=$1', [sid]);
+      await client.query('DELETE FROM enrollments WHERE student_id=$1', [sid]);
+      await client.query('DELETE FROM video_progress WHERE student_id=$1', [sid]).catch(() => {});
+      await client.query('DELETE FROM student_uniform WHERE student_id=$1', [sid]).catch(() => {});
+      await client.query('DELETE FROM student_materials WHERE student_id=$1', [sid]).catch(() => {});
+      // Unlink user account if exists (don't delete user, just unlink)
+      if (existing.rows[0].user_id) {
+        await client.query('UPDATE students SET user_id=NULL WHERE id=$1', [sid]);
+      }
+      await client.query('DELETE FROM students WHERE id=$1', [sid]);
+      await client.query('COMMIT');
+      res.json({ success: true, message: `Student "${existing.rows[0].full_name}" permanently deleted` });
+    } catch (txErr) {
+      await client.query('ROLLBACK');
+      throw txErr;
+    } finally {
+      client.release();
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -537,6 +676,57 @@ router.post('/:id/cert', authorize('super_admin', 'admin'), uploadCertificate.si
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── POST /api/students/:id/consent-image ──────────────────────────────
+router.post('/:id/consent-image', authorize('super_admin', 'admin'), uploadConsentImage.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) { res.status(400).json({ success: false, message: 'No image file uploaded' }); return; }
+    const url = `/uploads/consent/${req.file.filename}`;
+    const result = await query(
+      `UPDATE students SET consent_image_url=$1, consent_given=true WHERE id=$2 RETURNING id, consent_image_url, consent_pdf_url, consent_video_url, consent_given`,
+      [url, req.params.id]
+    );
+    if (result.rows.length === 0) { res.status(404).json({ success: false, message: 'Student not found' }); return; }
+    res.json({ success: true, data: result.rows[0], url });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error uploading consent image' });
+  }
+});
+
+// ── POST /api/students/:id/consent-pdf ────────────────────────────────
+router.post('/:id/consent-pdf', authorize('super_admin', 'admin'), uploadConsentPdf.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) { res.status(400).json({ success: false, message: 'No PDF file uploaded' }); return; }
+    const url = `/uploads/consent/${req.file.filename}`;
+    const result = await query(
+      `UPDATE students SET consent_pdf_url=$1, consent_given=true WHERE id=$2 RETURNING id, consent_image_url, consent_pdf_url, consent_video_url, consent_given`,
+      [url, req.params.id]
+    );
+    if (result.rows.length === 0) { res.status(404).json({ success: false, message: 'Student not found' }); return; }
+    res.json({ success: true, data: result.rows[0], url });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error uploading consent PDF' });
+  }
+});
+
+// ── POST /api/students/:id/consent-video ──────────────────────────────
+router.post('/:id/consent-video', authorize('super_admin', 'admin'), uploadConsentVideo.single('file'), async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.file) { res.status(400).json({ success: false, message: 'No video file uploaded' }); return; }
+    const url = `/uploads/consent/${req.file.filename}`;
+    const result = await query(
+      `UPDATE students SET consent_video_url=$1, consent_given=true WHERE id=$2 RETURNING id, consent_image_url, consent_pdf_url, consent_video_url, consent_given`,
+      [url, req.params.id]
+    );
+    if (result.rows.length === 0) { res.status(404).json({ success: false, message: 'Student not found' }); return; }
+    res.json({ success: true, data: result.rows[0], url });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: 'Server error uploading consent video' });
   }
 });
 
