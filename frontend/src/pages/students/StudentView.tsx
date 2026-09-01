@@ -204,7 +204,7 @@ const StudentView: React.FC = () => {
   };
 
   if (loading) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>Loading...</div>;
-  if (!student) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>Student not found</div>;
+  if (!student) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>Candidate not found</div>;
 
   const certItems = [
     { label: '10th Marksheet', collected: student.cert_10th_collected,  url: (student as any).cert_10th_url },
@@ -224,7 +224,7 @@ const StudentView: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <Link to="/students" className="btn btn-secondary btn-sm"><FiArrowLeft /></Link>
           <div>
-            <h1 className="page-title">Student Profile</h1>
+            <h1 className="page-title">Candidate Profile</h1>
             <p className="page-subtitle">{student.student_id}</p>
           </div>
         </div>
@@ -632,7 +632,7 @@ const StudentView: React.FC = () => {
             </div>
             <div style={{ background: 'var(--bg-tertiary)', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Student</span>
+                <span style={{ color: 'var(--text-muted)' }}>Candidate</span>
                 <span style={{ fontWeight: 600 }}>{student.full_name}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>

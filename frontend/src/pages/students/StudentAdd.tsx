@@ -267,7 +267,7 @@ const StudentAdd: React.FC = () => {
   return (
     <div>
       <div className="page-header">
-        <div><h1 className="page-title">Add Student</h1><p className="page-subtitle">Fill all details carefully</p></div>
+        <div><h1 className="page-title">Add Candidate</h1><p className="page-subtitle">Fill all details carefully</p></div>
         <button className="btn btn-secondary" onClick={() => navigate('/students')}>Cancel</button>
       </div>
 
@@ -298,7 +298,7 @@ const StudentAdd: React.FC = () => {
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">Full Name <span style={{ color: 'var(--red)' }}>*</span></label>
-              <input className="form-control" value={form.full_name} onChange={set('full_name')} placeholder="Student full name" required />
+              <input className="form-control" value={form.full_name} onChange={set('full_name')} placeholder="Candidate full name" required />
             </div>
             <div className="form-group">
               <label className="form-label">Mobile Number <span style={{ color: 'var(--red)' }}>*</span></label>
@@ -344,7 +344,6 @@ const StudentAdd: React.FC = () => {
               <label className="form-label">Status</label>
               <select className="form-control" value={form.status} onChange={set('status')}>
                 <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
               </select>
             </div>
           </div>
@@ -486,7 +485,7 @@ const StudentAdd: React.FC = () => {
                   style={{ width: 18, height: 18, accentColor: 'var(--amber)', cursor: 'pointer' }} />
                 <div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: payLater ? 'var(--amber)' : 'var(--text-primary)' }}>⏳ Pay Later</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Student will pay fees later</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Candidate will pay fees later</div>
                 </div>
               </label>
 

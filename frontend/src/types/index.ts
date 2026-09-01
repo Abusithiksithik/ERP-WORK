@@ -210,11 +210,12 @@ export interface Attendance {
 }
 
 export interface DashboardStats {
-  totalStudents: number;
+  totalCandidates: number;
   totalCourses: number;
   totalFaculty: number;
-  activeStudents: number;
+  activeCandidates: number;
   pendingPayments: number;
+  activeEnrollments: number;
 }
 
 export interface RecentStudent {
@@ -236,4 +237,36 @@ export interface BatchStudent {
   enrollment_status?: string;
   amount_paid?: number;
   balance_amount?: number;
+}
+
+export interface ExamFeeRecord {
+  exam_fee_record_id: number;
+  student_id: number;
+  student_code: string;
+  full_name: string;
+  mobile?: string;
+  course_name?: string;
+  batch_name?: string;
+  exam_fee: number;
+  other_fee: number;
+  other_fee_note?: string;
+  total_fee: number;
+  paid_amount: number;
+  pending_balance: number;
+  notes?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExamFeePayment {
+  id: number;
+  exam_fee_record_id: number;
+  student_id: number;
+  amount: number;
+  payment_date: string;
+  payment_method: string;
+  reference?: string;
+  notes?: string;
+  recorded_by_name?: string;
+  created_at: string;
 }

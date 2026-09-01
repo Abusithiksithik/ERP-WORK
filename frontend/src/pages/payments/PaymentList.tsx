@@ -224,7 +224,7 @@ const PaymentList: React.FC = () => {
             <table>
               <thead>
                 <tr>
-                  <th>Student</th>
+                  <th>Candidate</th>
                   <th>Course / Batch</th>
                   <th>Fee Type</th>
                   <th>Amount</th>
@@ -324,7 +324,7 @@ const PaymentList: React.FC = () => {
                 <div className="form-group">
                   <label className="form-label">Student *</label>
                   <select className="form-control" value={form.student_id} onChange={set('student_id')} required>
-                    <option value="">Select Student</option>
+                    <option value="">Select Candidate</option>
                     {students.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.student_id})</option>)}
                   </select>
                 </div>

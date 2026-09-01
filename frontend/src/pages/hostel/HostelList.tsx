@@ -276,7 +276,7 @@ const HostelList: React.FC = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">🏠 Hostel Management</h1>
-          <p className="page-subtitle">Students staying in hostel — fee tracking &amp; payments</p>
+          <p className="page-subtitle">Candidates staying in hostel — fee tracking &amp; payments</p>
         </div>
       </div>
 
@@ -319,14 +319,14 @@ const HostelList: React.FC = () => {
           <div className="empty-state">
             <div className="empty-state-icon">🏠</div>
             <h3>No Hostel Students</h3>
-            <p>Students whose Accommodation Type is set to "Hostel" will appear here automatically.</p>
+            <p>Candidates whose Accommodation Type is set to "Hostel" will appear here automatically.</p>
           </div>
         ) : (
           <div className="table-container">
             <table>
               <thead>
                 <tr>
-                  <th>Student</th>
+                  <th>Candidate</th>
                   <th>Course / Batch</th>
                   <th>Hostel Fee</th>
                   <th>Mess Fee</th>

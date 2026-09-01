@@ -118,7 +118,7 @@ const CourseList: React.FC = () => {
                   <th>Master Course</th>
                   <th>Duration</th>
                   <th>Fee</th>
-                  <th>Students</th>
+                  <th>Candidates</th>
                   <th>Status</th>
                   <th>Actions</th>
                 </tr>

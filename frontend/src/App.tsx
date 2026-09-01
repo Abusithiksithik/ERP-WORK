@@ -24,6 +24,7 @@ import CourseAdd from './pages/courses/CourseAdd';
 import CourseEdit from './pages/courses/CourseEdit';
 import BatchList from './pages/batches/BatchList';
 import HostelList from './pages/hostel/HostelList';
+import ExamFeeList from './pages/examFees/ExamFeeList';
 
 const ADMIN_ROLES   = ['super_admin', 'admin'];
 const ADMIN_INCHARGE = ['super_admin', 'admin', 'incharge'];
@@ -102,6 +103,11 @@ function App() {
           {/* Hostel — Admin only */}
           <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
             <Route path="/hostel" element={<HostelList />} />
+          </Route>
+
+          {/* Exam Fees — Admin, Incharge */}
+          <Route element={<PrivateRoute allowedRoles={ADMIN_INCHARGE} />}>
+            <Route path="/exam-fees" element={<ExamFeeList />} />
           </Route>
 
           {/* Users — Admin only */}

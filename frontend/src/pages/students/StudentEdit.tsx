@@ -278,8 +278,8 @@ const StudentEdit: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <Link to={`/students/${id}`} className="btn btn-secondary btn-sm"><FiArrowLeft /></Link>
           <div>
-            <h1 className="page-title">Edit Student</h1>
-            <p className="page-subtitle">Update student information</p>
+            <h1 className="page-title">Edit Candidate</h1>
+            <p className="page-subtitle">Update candidate information</p>
           </div>
         </div>
       </div>
@@ -345,8 +345,6 @@ const StudentEdit: React.FC = () => {
               <label className="form-label">Status</label>
               <select className="form-control" value={form.status || 'active'} onChange={set('status')}>
                 <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="suspended">Suspended</option>
               </select>
             </div>
           </div>

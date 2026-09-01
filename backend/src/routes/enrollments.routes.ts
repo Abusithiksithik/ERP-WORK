@@ -40,7 +40,13 @@ router.get('/', authorize('super_admin', 'admin', 'incharge', 'teacher'), async 
     const params: unknown[] = [];
     if (student_id) { params.push(student_id); q += ` AND e.student_id=$${params.length}`; }
     if (course_id)  { params.push(course_id);  q += ` AND e.course_id=$${params.length}`;  }
-    if (status)     { params.push(status);      q += ` AND e.status=$${params.length}`;     }
+    if (status) {
+      // Filter by enrollment status directly (approved or discontinued)
+      params.push(status);
+      q += ` AND e.status=$${params.length}`;
+    }
+    // No default exclusion: show all enrollments regardless of student status.
+    // Discontinued enrollments (e.status='discontinued') are shown when explicitly requested.
     q += ' ORDER BY e.created_at DESC';
     const result = await query(q, params);
     res.json({ success: true, data: result.rows });

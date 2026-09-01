@@ -151,7 +151,7 @@ const EnrollmentList: React.FC = () => {
   /* ── enroll submit ── */
   const handleEnrollSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!enrollForm.student_id) { toast.error('Select a student'); return; }
+    if (!enrollForm.student_id) { toast.error('Select a candidate'); return; }
     if (!enrollForm.course_id)  { toast.error('Select a course');  return; }
     setEnrollLoading(true);
     try {
@@ -232,11 +232,17 @@ const EnrollmentList: React.FC = () => {
     } catch (err: any) { toast.error(err.response?.data?.message || 'Failed'); }
     finally { setCourseLoading(false); }
   };
-  const handleDeleteCourse = async (id: number) => {
-    if (!confirm('Delete this course?')) return;
-    try { await api.delete(`/courses/${id}`); toast.success('Deleted'); fetchCourses(); }
-    catch { toast.error('Cannot delete — students enrolled'); }
-  };
+const handleDeleteCourse = async (id: number) => {
+  if (!confirm('Delete this course?')) return;
+
+  try {
+    await api.delete(`/courses/${id}`);
+    toast.success('Deleted');
+    fetchCourses();
+  } catch {
+    toast.error('Cannot delete — candidates enrolled');
+  }
+};
   const handleToggleCourse = async (id: number) => {
     try { await api.patch(`/courses/${id}/status`); fetchCourses(); }
     catch { toast.error('Failed'); }
@@ -402,7 +408,7 @@ const EnrollmentList: React.FC = () => {
               setEnrollFilteredBatches([]);
               setShowEnrollModal(true);
             }}>
-              <FiPlus /> Enroll Student
+              <FiPlus /> Enroll Candidate
             </button>
           )}
           {activeTab === 'courses' && isAdmin && (
@@ -427,10 +433,8 @@ const EnrollmentList: React.FC = () => {
           <div className="search-bar">
             <select className="form-control filter-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
               <option value="">All Status</option>
-              <option value="pending">Pending</option>
               <option value="approved">Approved</option>
-              <option value="rejected">Rejected</option>
-              <option value="completed">Completed</option>
+              <option value="discontinued">Discontinued</option>
             </select>
           </div>
 
@@ -440,7 +444,7 @@ const EnrollmentList: React.FC = () => {
                 <table>
                   <thead>
                     <tr>
-                      <th>Student</th>
+                      <th>Candidate</th>
                       <th>Course</th>
                       <th>Batch</th>
                       <th>Date</th>
@@ -489,7 +493,7 @@ const EnrollmentList: React.FC = () => {
                                 <Link
                                   to={`/students/${enr.student_id}/edit`}
                                   className="action-btn edit"
-                                  title="Edit Student"
+                                  title="Edit Candidate"
                                   style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                                 >
                                   <FiEdit2 />
@@ -558,7 +562,7 @@ const EnrollmentList: React.FC = () => {
                       <th>Duration</th>
                       <th>Fee</th>
                       <th>Type</th>
-                      <th>Students</th>
+                      <th>Candidates</th>
                       <th>Status</th>
                       <th>Actions</th>
                     </tr>
@@ -635,7 +639,7 @@ const EnrollmentList: React.FC = () => {
                       <th>Course</th>
                       <th>Start</th>
                       <th>End</th>
-                      <th>Students</th>
+                      <th>Candidates</th>
                       <th>Status</th>
                       <th>Actions</th>
                     </tr>
@@ -706,7 +710,7 @@ const EnrollmentList: React.FC = () => {
                             {!batchStudentsExpanded[b.id] ? (
                               <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)', fontSize: 13 }}>Loading students...</div>
                             ) : batchStudentsExpanded[b.id].length === 0 ? (
-                              <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: 13 }}>No students enrolled in this batch yet.</div>
+                              <div style={{ textAlign: 'center', padding: '16px', color: 'var(--text-muted)', fontSize: 13 }}>No candidates enrolled in this batch yet.</div>
                             ) : (
                               <>
                                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
@@ -758,14 +762,14 @@ const EnrollmentList: React.FC = () => {
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth: 540 }}>
             <div className="modal-header">
-              <h2 className="modal-title">Enroll Student</h2>
+              <h2 className="modal-title">Enroll Candidate</h2>
               <button className="modal-close" onClick={() => setShowEnrollModal(false)}><FiX /></button>
             </div>
             <form onSubmit={handleEnrollSubmit}>
               <div className="form-group">
-                <label className="form-label">Student *</label>
+                <label className="form-label">Candidate *</label>
                 <select className="form-control" value={enrollForm.student_id} onChange={setE('student_id')} required>
-                  <option value="">Select Student</option>
+                  <option value="">Select Candidate</option>
                   {students.map(s => <option key={s.id} value={s.id}>{s.full_name} ({s.student_id})</option>)}
                 </select>
               </div>
@@ -1164,7 +1168,7 @@ const EnrollmentList: React.FC = () => {
               <div className="empty-state" style={{ padding: 40 }}>
                 <div className="empty-state-icon">🎓</div>
                 <h3>No Students</h3>
-                <p>No students enrolled in this batch yet.</p>
+                <p>No candidates enrolled in this batch yet.</p>
               </div>
             ) : (
               <div className="table-container">

@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS students (
     course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
     batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
     admission_date DATE DEFAULT CURRENT_DATE,
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'suspended', 'discontinued')),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'discontinued')),
     discontinued_at TIMESTAMPTZ,
     discontinued_reason TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -169,11 +169,11 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- Update CHECK constraint to include 'discontinued'
+-- Ensure students status constraint is correct (idempotent)
 DO $$ BEGIN
   ALTER TABLE students DROP CONSTRAINT IF EXISTS students_status_check;
   ALTER TABLE students ADD CONSTRAINT students_status_check
-    CHECK (status IN ('active', 'inactive', 'suspended', 'discontinued'));
+    CHECK (status IN ('active', 'discontinued'));
 EXCEPTION WHEN others THEN NULL;
 END $$;
 
@@ -265,7 +265,7 @@ CREATE TABLE IF NOT EXISTS enrollments (
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'completed')),
+    status VARCHAR(20) DEFAULT 'approved' CHECK (status IN ('approved', 'discontinued')),
     enrolled_at TIMESTAMPTZ DEFAULT NOW(),
     approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     approved_at TIMESTAMPTZ,
@@ -330,10 +330,11 @@ CREATE TABLE IF NOT EXISTS attendance (
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
     attendance_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    status VARCHAR(20) DEFAULT 'present' CHECK (status IN ('present', 'absent', 'late', 'excused')),
+    status VARCHAR(20) DEFAULT 'present' CHECK (status IN ('present', 'absent')),
     marked_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(student_id, attendance_date)
 );
 
