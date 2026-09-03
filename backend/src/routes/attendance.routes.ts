@@ -67,7 +67,6 @@ router.get('/', authorize('super_admin', 'admin', 'incharge', 'teacher', 'studen
 router.get('/report/student/:studentId', authorize('super_admin', 'admin', 'incharge', 'teacher', 'student'), async (req: AuthRequest, res: Response) => {
   try {
     const { start_date, end_date } = req.query;
-<<<<<<< HEAD
     let targetStudentId = req.params.studentId;
     if (req.user!.role === 'student') {
       const own = await query('SELECT id FROM students WHERE user_id=$1', [req.user!.id]);
@@ -81,12 +80,6 @@ router.get('/report/student/:studentId', authorize('super_admin', 'admin', 'inch
              FROM attendance a
              WHERE a.student_id = $1`;
     const params: unknown[] = [targetStudentId];
-=======
-    let q = `SELECT a.id, a.attendance_date, a.status, a.notes
-             FROM attendance a
-             WHERE a.student_id = $1`;
-    const params: unknown[] = [req.params.studentId];
->>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
     if (start_date) { params.push(start_date); q += ` AND a.attendance_date >= $${params.length}`; }
     if (end_date)   { params.push(end_date);   q += ` AND a.attendance_date <= $${params.length}`; }
     q += ' ORDER BY a.attendance_date ASC';
@@ -95,11 +88,7 @@ router.get('/report/student/:studentId', authorize('super_admin', 'admin', 'inch
     // working_days = unique dates that appear in attendance for this student
     const workingDaysRes = await query(
       `SELECT COUNT(DISTINCT attendance_date) as working_days FROM attendance WHERE student_id = $1`,
-<<<<<<< HEAD
       [targetStudentId]
-=======
-      [req.params.studentId]
->>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
     );
     const working_days = parseInt(workingDaysRes.rows[0]?.working_days) || 0;
     const present = result.rows.filter((r: any) => r.status === 'present').length;

@@ -24,11 +24,8 @@ import CourseEdit from './pages/courses/CourseEdit';
 import BatchList from './pages/batches/BatchList';
 import HostelList from './pages/hostel/HostelList';
 import ExamFeeList from './pages/examFees/ExamFeeList';
-<<<<<<< HEAD
 import NewAdmissionList from './pages/newAdmission/NewAdmissionList';
 import NewAdmissionAdd from './pages/newAdmission/NewAdmissionAdd';
-=======
->>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
 
 const ADMIN_ROLES   = ['super_admin', 'admin'];
 const ADMIN_INCHARGE = ['super_admin', 'admin', 'incharge'];
@@ -113,15 +110,12 @@ function App() {
             <Route path="/exam-fees" element={<ExamFeeList />} />
           </Route>
 
-<<<<<<< HEAD
           {/* New Admissions — Admin, Incharge */}
           <Route element={<PrivateRoute allowedRoles={ADMIN_INCHARGE} />}>
             <Route path="/new-admissions" element={<NewAdmissionList />} />
             <Route path="/new-admissions/add" element={<NewAdmissionAdd />} />
           </Route>
 
-=======
->>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
           {/* Users — Admin only */}
           <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
             <Route path="/users" element={<UserList />} />

@@ -4,11 +4,7 @@ import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts';
-<<<<<<< HEAD
 import { FiUsers, FiBook, FiUserCheck, FiCheckCircle, FiFileText } from 'react-icons/fi';
-=======
-import { FiUsers, FiBook, FiUserCheck, FiCheckCircle, FiClock, FiFileText } from 'react-icons/fi';
->>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
 import api from '../../api/axios';
 
 const fmt = (n: number | string) =>
@@ -34,10 +30,6 @@ interface Stats {
   totalCourses: number;
   totalFaculty: number;
   activeCandidates: number;
-<<<<<<< HEAD
-=======
-  pendingPayments: number;
->>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
   activeEnrollments: number;
 }
 
@@ -89,11 +81,7 @@ const Dashboard: React.FC = () => {
     { label: 'Active Courses',      value: stats.totalCourses,       icon: <FiBook />,        color: 'var(--teal)',     bg: 'rgba(16,185,129,0.15)' },
     { label: 'Total Faculty',       value: stats.totalFaculty,       icon: <FiUserCheck />,   color: 'var(--accent-2)', bg: 'rgba(139,92,246,0.15)' },
     { label: 'Active Enrollments',  value: stats.activeEnrollments,  icon: <FiCheckCircle />, color: 'var(--teal)',     bg: 'rgba(16,185,129,0.15)' },
-<<<<<<< HEAD
 
-=======
-    { label: 'Pending Payments',    value: stats.pendingPayments,    icon: <FiClock />,       color: 'var(--red)',      bg: 'rgba(239,68,68,0.15)'  },
->>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
     { label: 'Active Candidates',   value: stats.activeCandidates,   icon: <FiFileText />,    color: '#f59e0b',         bg: 'rgba(245,158,11,0.15)' },
   ] : [];
 
@@ -143,10 +131,6 @@ const Dashboard: React.FC = () => {
         <Link to="/students"    className="btn btn-secondary">🎓 Candidates</Link>
         <Link to="/enrollments" className="btn btn-secondary">📋 Enrollments</Link>
         <Link to="/exam-fees"   className="btn btn-secondary">📝 Exam Fees</Link>
-<<<<<<< HEAD
-=======
-        <Link to="/payments"    className="btn btn-secondary">💰 Payments</Link>
->>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
         <Link to="/attendance"  className="btn btn-secondary">📅 Attendance</Link>
       </div>
 

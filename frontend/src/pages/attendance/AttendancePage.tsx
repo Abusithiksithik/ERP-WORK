@@ -202,7 +202,6 @@ const AttendancePage: React.FC = () => {
                 </div>
               </div>
 
-<<<<<<< HEAD
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {students.map(s => {
                   const status = attendance[s.id] || 'present';
@@ -220,25 +219,6 @@ const AttendancePage: React.FC = () => {
                           onClick={() => setAttendance(a => ({ ...a, [s.id]: 'present' }))}
                           style={{
                             width: 44,
-=======
-              <div className="attendance-grid">
-                {students.map(s => {
-                  const status = attendance[s.id] || 'present';
-                  return (
-                    <div key={s.id} className="attendance-item attendance-item-vertical">
-                      <div className="student-avatar" style={{ width: 44, height: 44, fontSize: 16, margin: '0 auto 8px' }}>
-                        {s.full_name.charAt(0)}
-                      </div>
-                      <div style={{ textAlign: 'center', marginBottom: 10 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{s.full_name}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.student_id}</div>
-                      </div>
-                      <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
-                        <button
-                          onClick={() => setAttendance(a => ({ ...a, [s.id]: 'present' }))}
-                          style={{
-                            flex: 1,
->>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
                             padding: '5px 0',
                             borderRadius: 6,
                             border: '2px solid',
@@ -254,11 +234,7 @@ const AttendancePage: React.FC = () => {
                         <button
                           onClick={() => setAttendance(a => ({ ...a, [s.id]: 'absent' }))}
                           style={{
-<<<<<<< HEAD
                             width: 44,
-=======
-                            flex: 1,
->>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
                             padding: '5px 0',
                             borderRadius: 6,
                             border: '2px solid',

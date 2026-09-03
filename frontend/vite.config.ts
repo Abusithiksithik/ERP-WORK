@@ -8,11 +8,11 @@ export default defineConfig({
     port: 5123,
     proxy: {
       '/api': {
-        target: 'http://10.0.0.50:5000',
+        target: 'http://localhost:5007',
         changeOrigin: true,
       },
       '/uploads': {
-        target: 'http://10.0.0.50:5000',
+        target: 'http://localhost:5007',
         changeOrigin: true,
       }
     }
