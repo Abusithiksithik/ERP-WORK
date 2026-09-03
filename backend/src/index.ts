@@ -5,8 +5,10 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import path from 'path';
 import fs from 'fs';
-import dotenv from 'dotenv';
 import { pool } from './config/db';
+import dotenv from 'dotenv';
+// import { pool } from './config/db';
+
 import { hashPassword } from './utils/bcrypt';
 
 dotenv.config();
