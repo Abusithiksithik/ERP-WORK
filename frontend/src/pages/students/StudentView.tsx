@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import {
   FiEdit2, FiArrowLeft, FiUser, FiPhone, FiMail, FiCalendar,
   FiBook, FiCheckSquare, FiDollarSign, FiMapPin, FiUsers,
-  FiTrash2, FiPlus, FiX, FiPackage,
+  FiTrash2, FiX, FiPackage,
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../../api/axios';
@@ -48,14 +48,6 @@ const StudentView: React.FC = () => {
   const [uniform, setUniform] = useState<UniformStatus | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Payment modal
-  const [showPayModal, setShowPayModal] = useState(false);
-  const [payLoading, setPayLoading]     = useState(false);
-  const [payForm, setPayForm] = useState({
-    amount: '', payment_date: new Date().toISOString().split('T')[0],
-    payment_method: 'cash', notes: '',
-  });
-
   // Material modal
   const [showMaterialModal, setShowMaterialModal] = useState(false);
   const [matLoading, setMatLoading]               = useState(false);
@@ -97,50 +89,16 @@ const StudentView: React.FC = () => {
 
   // ── Computed fee values ──────────────────────────────────────────────
   const enrollment = enrollments[0];
-  const courseFee  = enrollment
-    ? Number(enrollment.course_fee || 0)
+  const baseCourseFee = enrollment
+    ? Number(enrollment.total_fee || enrollment.course_fee || 0)
     : Number((student as any)?.course_fee_amount || 0);
+  const discount = enrollment ? Number(enrollment.discount || 0) : 0;
+  const courseFee = Math.max(0, baseCourseFee - discount);
 
   const verifiedPayments = payments.filter(p => p.status === 'verified');
   const totalPaid = verifiedPayments.reduce((s, p) => s + Number(p.amount), 0);
   const balance   = Math.max(0, courseFee - totalPaid);
   const isFree    = courseFee === 0;
-
-  // ── Record Payment ──────────────────────────────────────────────────
-  const handlePaySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!payForm.amount || Number(payForm.amount) <= 0) { toast.error('Enter a valid amount'); return; }
-    if (Number(payForm.amount) > balance) { toast.error(`Amount cannot exceed balance of ${fmt(balance)}`); return; }
-    if (!enrollment) { toast.error('No enrollment found for this student'); return; }
-
-    setPayLoading(true);
-    try {
-      // Resolve payment method to payment_method_id
-      let paymentMethodId = null;
-      try {
-        const pmRes = await api.get('/payment-methods');
-        const methods = pmRes.data.data || [];
-        const found = methods.find((m: any) => m.method_type === payForm.payment_method && m.is_enabled);
-        if (found) paymentMethodId = found.id;
-      } catch { /* use null if not found */ }
-
-      await api.post('/payments', {
-        student_id:        id,
-        enrollment_id:     enrollment.id,
-        payment_method_id: paymentMethodId,
-        amount:            Number(payForm.amount),
-        payment_date:      payForm.payment_date,
-        payment_type:      'course_fee',
-        notes:             payForm.notes || undefined,
-      });
-      toast.success('Payment recorded successfully!');
-      setShowPayModal(false);
-      setPayForm({ amount: '', payment_date: new Date().toISOString().split('T')[0], payment_method: 'cash', notes: '' });
-      fetchData();
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to record payment');
-    } finally { setPayLoading(false); }
-  };
 
   // ── Delete Payment ──────────────────────────────────────────────────
   const handleDeletePayment = async (paymentId: number) => {
@@ -204,7 +162,7 @@ const StudentView: React.FC = () => {
   };
 
   if (loading) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>Loading...</div>;
-  if (!student) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>Student not found</div>;
+  if (!student) return <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>Candidate not found</div>;
 
   const certItems = [
     { label: '10th Marksheet', collected: student.cert_10th_collected,  url: (student as any).cert_10th_url },
@@ -224,21 +182,11 @@ const StudentView: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <Link to="/students" className="btn btn-secondary btn-sm"><FiArrowLeft /></Link>
           <div>
-            <h1 className="page-title">Student Profile</h1>
+            <h1 className="page-title">Candidate Profile</h1>
             <p className="page-subtitle">{student.student_id}</p>
           </div>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
-          {isAdmin && (
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowPayModal(true)}
-              disabled={isFree || balance <= 0}
-              style={{ background: 'linear-gradient(135deg,var(--teal),#059669)' }}
-            >
-              <FiDollarSign /> Record Payment
-            </button>
-          )}
           {isAdmin && (
             <Link to={`/students/${id}/edit`} className="btn btn-secondary"><FiEdit2 /> Edit</Link>
           )}
@@ -275,17 +223,13 @@ const StudentView: React.FC = () => {
               <h3 className="section-heading" style={{ margin: 0 }}>
                 <FiDollarSign style={{ verticalAlign: 'middle', marginRight: 6 }} />Fee Summary
               </h3>
-              {isAdmin && !isFree && balance > 0 && (
-                <button className="btn btn-sm" onClick={() => setShowPayModal(true)}
-                  style={{ fontSize: 11, padding: '4px 10px', background: 'rgba(16,185,129,0.12)', color: 'var(--teal)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 8 }}>
-                  + Pay
-                </button>
-              )}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div className="fee-summary-row">
                 <span className="fee-summary-label">Course Fee</span>
-                <span className="fee-summary-value">{isFree ? '₹0 (Free)' : fmt(courseFee)}</span>
+                <span className="fee-summary-value">
+                  {isFree ? '₹0 (Free)' : (discount > 0 ? <><span style={{ textDecoration: 'line-through', color: 'var(--text-muted)', marginRight: 6 }}>{fmt(baseCourseFee)}</span>{fmt(courseFee)}</> : fmt(courseFee))}
+                </span>
               </div>
               <div className="fee-summary-row">
                 <span className="fee-summary-label">Total Paid</span>
@@ -451,12 +395,6 @@ const StudentView: React.FC = () => {
               <h3 className="section-heading" style={{ margin: 0 }}>
                 <FiDollarSign style={{ verticalAlign: 'middle', marginRight: 6 }} />Payment History
               </h3>
-              {isAdmin && !isFree && balance > 0 && (
-                <button className="btn btn-sm" onClick={() => setShowPayModal(true)}
-                  style={{ background: 'linear-gradient(135deg,var(--teal),#059669)', color: '#fff', border: 'none', borderRadius: 8 }}>
-                  <FiPlus size={13} /> Record Payment
-                </button>
-              )}
             </div>
             {isFree ? (
               <div style={{ padding: '16px', textAlign: 'center', color: 'var(--teal)', fontWeight: 600 }}>
@@ -465,13 +403,6 @@ const StudentView: React.FC = () => {
             ) : verifiedPayments.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-muted)', fontSize: 13 }}>
                 No payment records yet.
-                {isAdmin && balance > 0 && (
-                  <div style={{ marginTop: 10 }}>
-                    <button className="btn btn-sm btn-primary" onClick={() => setShowPayModal(true)}>
-                      <FiPlus size={12} /> Record First Payment
-                    </button>
-                  </div>
-                )}
               </div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
@@ -621,81 +552,6 @@ const StudentView: React.FC = () => {
           </div>
         </div>
       </div>
-
-      {/* ── Record Payment Modal ── */}
-      {showPayModal && (
-        <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth: 460 }}>
-            <div className="modal-header">
-              <h2 className="modal-title">💰 Record Payment</h2>
-              <button className="modal-close" onClick={() => setShowPayModal(false)}><FiX /></button>
-            </div>
-            <div style={{ background: 'var(--bg-tertiary)', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Student</span>
-                <span style={{ fontWeight: 600 }}>{student.full_name}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Course Fee</span>
-                <span style={{ fontWeight: 600 }}>{fmt(courseFee)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Total Paid</span>
-                <span style={{ fontWeight: 600, color: 'var(--teal)' }}>{fmt(totalPaid)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Balance Due</span>
-                <span style={{ fontWeight: 700, color: 'var(--red)' }}>{fmt(balance)}</span>
-              </div>
-            </div>
-            <form onSubmit={handlePaySubmit}>
-              <div className="form-grid">
-                <div className="form-group">
-                  <label className="form-label">Amount ₹ *</label>
-                  <input
-                    type="number" className="form-control"
-                    value={payForm.amount}
-                    onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))}
-                    placeholder={`Max: ₹${balance.toLocaleString('en-IN')}`}
-                    min={1} max={balance} required
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Date *</label>
-                  <input type="date" className="form-control"
-                    value={payForm.payment_date}
-                    onChange={e => setPayForm(p => ({ ...p, payment_date: e.target.value }))}
-                    required
-                  />
-                </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Payment Method</label>
-                <select className="form-control"
-                  value={payForm.payment_method}
-                  onChange={e => setPayForm(p => ({ ...p, payment_method: e.target.value }))}>
-                  <option value="cash">Cash</option>
-                  <option value="upi">GPay / UPI</option>
-                  <option value="bank">Bank Transfer</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Notes</label>
-                <input type="text" className="form-control"
-                  value={payForm.notes}
-                  onChange={e => setPayForm(p => ({ ...p, notes: e.target.value }))}
-                  placeholder="Optional notes" />
-              </div>
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button type="submit" className="btn btn-primary" disabled={payLoading} style={{ flex: 1 }}>
-                  {payLoading ? '⏳ Recording...' : '✓ Record Payment'}
-                </button>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowPayModal(false)}>Cancel</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* ── Add Material Modal ── */}
       {showMaterialModal && (

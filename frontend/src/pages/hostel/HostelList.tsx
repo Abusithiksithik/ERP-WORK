@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { FiEdit2, FiDollarSign, FiX, FiSearch, FiClock } from 'react-icons/fi';
+import { FiEdit2, FiDollarSign, FiX, FiSearch, FiClock, FiLayers } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../../api/axios';
 
@@ -17,6 +17,7 @@ interface HostelStudent {
   hostel_fee: number;
   mess_fee: number;
   total_fee: number;
+  discount: number;
   paid_amount: number;
   pending_balance: number;
   notes: string | null;
@@ -59,6 +60,7 @@ const normalise = (row: Record<string, unknown>): HostelStudent => ({
   hostel_fee:       toNum(row.hostel_fee),
   mess_fee:         toNum(row.mess_fee),
   total_fee:        toNum(row.total_fee),
+  discount:         toNum(row.discount),
   paid_amount:      toNum(row.paid_amount),
   pending_balance:  toNum(row.pending_balance),
   notes:            row.notes ? String(row.notes) : null,
@@ -90,11 +92,26 @@ const HostelList: React.FC = () => {
   });
   const [savingPay, setSavingPay]     = useState(false);
 
+  // ── Payment action dropdown ──────────────────────────────────────────────
+  const [payDropdownId, setPayDropdownId] = useState<number | null>(null);
+
+  // ── Discount modal ──────────────────────────────────────────────────────
+  const [discountModal, setDiscountModal]     = useState(false);
+  const [discountTarget, setDiscountTarget]   = useState<HostelStudent | null>(null);
+  const [discountAmount, setDiscountAmount]   = useState('');
+  const [savingDiscount, setSavingDiscount]   = useState(false);
+
   // ── Payment History modal ───────────────────────────────────────────────
   const [historyModal, setHistoryModal]     = useState(false);
   const [historyTarget, setHistoryTarget]   = useState<HostelStudent | null>(null);
   const [payments, setPayments]             = useState<HostelPayment[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // ── Bulk Set Fee modal ─────────────────────────────────────────────────────
+  const [bulkModal, setBulkModal]         = useState(false);
+  const [bulkHostelFee, setBulkHostelFee] = useState('');
+  const [bulkMessFee, setBulkMessFee]     = useState('');
+  const [savingBulk, setSavingBulk]       = useState(false);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Data loading
@@ -115,6 +132,16 @@ const HostelList: React.FC = () => {
   }, [search]);
 
   useEffect(() => { load(); }, [load]);
+
+
+
+  // Close pay dropdown when clicking outside
+  useEffect(() => {
+    if (payDropdownId === null) return;
+    const handler = () => setPayDropdownId(null);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [payDropdownId]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Summary stats
@@ -234,6 +261,43 @@ const HostelList: React.FC = () => {
   };
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Discount handlers
+  // ─────────────────────────────────────────────────────────────────────────
+  const openDiscount = (s: HostelStudent) => {
+    setDiscountTarget(s);
+    setDiscountAmount(s.discount ? String(s.discount) : '');
+    setPayDropdownId(null);
+    setDiscountModal(true);
+  };
+
+  const handleSaveDiscount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!discountTarget) return;
+    const amt = parseFloat(discountAmount);
+    if (isNaN(amt) || amt < 0) { toast.error('Enter a valid discount amount'); return; }
+    setSavingDiscount(true);
+    try {
+      const r = await api.post(`/hostel/${discountTarget.hostel_record_id}/discount`, { discount: amt });
+      const updated = r.data.data as Record<string, unknown> | null;
+      if (updated) {
+        setStudents(prev =>
+          prev.map(s =>
+            s.hostel_record_id === discountTarget.hostel_record_id
+              ? { ...s, discount: toNum(updated.discount), pending_balance: toNum(updated.pending_balance) }
+              : s
+          )
+        );
+      }
+      toast.success('Discount applied!');
+      setDiscountModal(false);
+    } catch {
+      toast.error('Failed to apply discount');
+    } finally {
+      setSavingDiscount(false);
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Payment History handlers
   // ─────────────────────────────────────────────────────────────────────────
   const openHistory = async (s: HostelStudent) => {
@@ -262,6 +326,46 @@ const HostelList: React.FC = () => {
   };
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Bulk Set Fee handler
+  // ─────────────────────────────────────────────────────────────────────────
+  const handleBulkSetFee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const hf = parseFloat(bulkHostelFee);
+    const mf = parseFloat(bulkMessFee);
+    if (isNaN(hf) || hf < 0) { toast.error('Hostel fee must be 0 or more'); return; }
+    if (isNaN(mf) || mf < 0) { toast.error('Mess fee must be 0 or more'); return; }
+
+    if (students.length === 0) { toast.error('No eligible hostel students found'); return; }
+
+    setSavingBulk(true);
+    try {
+      await Promise.all(
+        students.map(s =>
+          api.put(`/hostel/${s.hostel_record_id}`, { hostel_fee: hf, mess_fee: mf, notes: s.notes })
+        )
+      );
+      // Update local state — each student keeps their own paid_amount unchanged
+      setStudents(prev =>
+        prev.map(s => ({
+          ...s,
+          hostel_fee:      hf,
+          mess_fee:        mf,
+          total_fee:       hf + mf,
+          pending_balance: Math.max(0, hf + mf - s.discount - s.paid_amount),
+        }))
+      );
+      toast.success(`Hostel & Mess fee applied to ${students.length} student${students.length !== 1 ? 's' : ''}`);
+      setBulkModal(false);
+      setBulkHostelFee('');
+      setBulkMessFee('');
+    } catch {
+      toast.error('Failed to apply fees');
+    } finally {
+      setSavingBulk(false);
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Fee edit live preview
   // ─────────────────────────────────────────────────────────────────────────
   const previewTotal   = (parseFloat(feeForm.hostel_fee) || 0) + (parseFloat(feeForm.mess_fee) || 0);
@@ -276,7 +380,12 @@ const HostelList: React.FC = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">🏠 Hostel Management</h1>
-          <p className="page-subtitle">Students staying in hostel — fee tracking &amp; payments</p>
+          <p className="page-subtitle">Candidates staying in hostel — fee tracking &amp; payments</p>
+        </div>
+        <div>
+          <button className="btn btn-primary" onClick={() => { setBulkHostelFee(''); setBulkMessFee(''); setBulkModal(true); }}>
+            <FiLayers /> Set Hostel &amp; Mess Fee
+          </button>
         </div>
       </div>
 
@@ -319,14 +428,14 @@ const HostelList: React.FC = () => {
           <div className="empty-state">
             <div className="empty-state-icon">🏠</div>
             <h3>No Hostel Students</h3>
-            <p>Students whose Accommodation Type is set to "Hostel" will appear here automatically.</p>
+            <p>Candidates whose Accommodation Type is set to "Hostel" will appear here automatically.</p>
           </div>
         ) : (
           <div className="table-container">
             <table>
               <thead>
                 <tr>
-                  <th>Student</th>
+                  <th>Candidate</th>
                   <th>Course / Batch</th>
                   <th>Hostel Fee</th>
                   <th>Mess Fee</th>
@@ -392,18 +501,48 @@ const HostelList: React.FC = () => {
                           >
                             <FiEdit2 />
                           </button>
-                          <button
-                            className="action-btn"
-                            title="Add Payment"
-                            style={{
-                              color: '#10b981', background: 'rgba(16,185,129,0.1)',
-                              border: 'none', borderRadius: 8, width: 32, height: 32,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                            }}
-                            onClick={() => openPay(s)}
-                          >
-                            <FiDollarSign />
-                          </button>
+                          {/* Payment dropdown */}
+                          <div style={{ position: 'relative' }}>
+                            <button
+                              className="action-btn"
+                              title="Payment"
+                              style={{
+                                color: '#10b981', background: 'rgba(16,185,129,0.1)',
+                                border: 'none', borderRadius: 8, width: 32, height: 32,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                              }}
+                              onClick={e => { e.stopPropagation(); setPayDropdownId(payDropdownId === s.hostel_record_id ? null : s.hostel_record_id); }}
+                            >
+                              <FiDollarSign />
+                            </button>
+                            {payDropdownId === s.hostel_record_id && (
+                              <div onClick={e => e.stopPropagation()} style={{
+                                position: 'absolute', top: '110%', right: 0, zIndex: 999,
+                                background: 'var(--bg-secondary)', border: '1px solid var(--border-light)',
+                                borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
+                                minWidth: 160, overflow: 'hidden',
+                              }}>
+                                <button
+                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-primary)' }}
+                                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
+                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                                  onClick={() => { setPayDropdownId(null); openPay(s); }}
+                                >💰 Record Payment</button>
+                                <button
+                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-primary)' }}
+                                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
+                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                                  onClick={() => openDiscount(s)}
+                                >🏷️ Discount</button>
+                                <button
+                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}
+                                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
+                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+                                  onClick={() => setPayDropdownId(null)}
+                                >✕ Cancel</button>
+                              </div>
+                            )}
+                          </div>
                           <button
                             className="action-btn"
                             title="Payment History"
@@ -599,6 +738,62 @@ const HostelList: React.FC = () => {
         </div>
       )}
 
+      {/* ──────────────────────────── Discount Modal ──────────────────────────── */}
+      {discountModal && discountTarget && (
+        <div className="modal-overlay" onClick={() => setDiscountModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">🏷️ Apply Discount</h2>
+              <button className="modal-close" onClick={() => setDiscountModal(false)}><FiX /></button>
+            </div>
+            <div style={{
+              marginBottom: 16, padding: '12px 14px',
+              background: 'rgba(245,158,11,0.07)', borderRadius: 8,
+            }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                {discountTarget.full_name} — {discountTarget.student_code}
+              </div>
+              <div style={{ fontSize: 12, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                <span>Total: <strong>{fmt(discountTarget.total_fee)}</strong></span>
+                <span>Discount: <strong style={{ color: '#f59e0b' }}>{fmt(discountTarget.discount)}</strong></span>
+                <span>Pending: <strong style={{ color: discountTarget.pending_balance > 0 ? '#ef4444' : '#10b981' }}>
+                  {discountTarget.pending_balance <= 0 ? '✓ Cleared' : fmt(discountTarget.pending_balance)}
+                </strong></span>
+              </div>
+            </div>
+            <form onSubmit={handleSaveDiscount}>
+              <div className="form-group">
+                <label className="form-label">Discount Amount (₹) *</label>
+                <input
+                  type="number" className="form-control" min="0" step="any"
+                  placeholder="e.g. 2000"
+                  value={discountAmount}
+                  onChange={e => setDiscountAmount(e.target.value)}
+                  autoFocus
+                  required
+                />
+                {Number(discountAmount) > 0 && (
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                    Final Pending after discount:{' '}
+                    <strong style={{ color: '#10b981' }}>
+                      {fmt(Math.max(0, discountTarget.total_fee - Number(discountAmount) - discountTarget.paid_amount))}
+                    </strong>
+                  </p>
+                )}
+              </div>
+              <div className="form-actions">
+                <button type="submit" className="btn btn-primary" disabled={savingDiscount}>
+                  {savingDiscount ? 'Applying...' : '✓ Apply Discount'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setDiscountModal(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ──────────────────────────── Payment History Modal ──────────────────── */}
       {historyModal && historyTarget && (
         <div className="modal-overlay">
@@ -675,6 +870,79 @@ const HostelList: React.FC = () => {
             <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>
               <button className="btn btn-secondary" onClick={() => setHistoryModal(false)}>Close</button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* ──────────────────────────── Bulk Set Fee Modal ──────────────────────── */}
+      {bulkModal && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">🏠 Set Hostel &amp; Mess Fee</h2>
+              <button className="modal-close" onClick={() => setBulkModal(false)}><FiX /></button>
+            </div>
+
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>
+              Enter the fee amounts. The same Hostel Fee and Mess Fee will be applied to all eligible hostel students. Payments remain individual per student.
+            </p>
+
+            <form onSubmit={handleBulkSetFee}>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Hostel Fee (₹) *</label>
+                  <input
+                    type="number" className="form-control" min="0" step="any"
+                    placeholder="e.g. 3000"
+                    value={bulkHostelFee}
+                    onChange={e => setBulkHostelFee(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Mess Fee (₹) *</label>
+                  <input
+                    type="number" className="form-control" min="0" step="any"
+                    placeholder="e.g. 3000"
+                    value={bulkMessFee}
+                    onChange={e => setBulkMessFee(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              {(bulkHostelFee || bulkMessFee) && (
+                <div style={{
+                  padding: '12px 14px', background: 'rgba(16,185,129,0.07)',
+                  borderRadius: 8, marginBottom: 16, fontSize: 13,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span>Hostel Fee</span>
+                    <strong>{fmt(parseFloat(bulkHostelFee) || 0)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span>Mess Fee</span>
+                    <strong>{fmt(parseFloat(bulkMessFee) || 0)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, borderTop: '1px solid var(--border-light)', paddingTop: 6, marginTop: 4 }}>
+                    <span>Total per Student</span>
+                    <span style={{ color: 'var(--accent)' }}>{fmt((parseFloat(bulkHostelFee) || 0) + (parseFloat(bulkMessFee) || 0))}</span>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14, padding: '8px 12px', background: 'rgba(99,102,241,0.07)', borderRadius: 8 }}>
+                This will apply to <strong>{students.length}</strong> eligible hostel student{students.length !== 1 ? 's' : ''}.
+              </div>
+
+              <div className="form-actions">
+                <button type="submit" className="btn btn-primary" disabled={savingBulk}>
+                  {savingBulk ? 'Applying...' : '✓ Set Fee'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setBulkModal(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

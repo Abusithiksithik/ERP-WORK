@@ -249,7 +249,7 @@ const StudentEdit: React.FC = () => {
       }
 
       toast.success('Student updated successfully!');
-      navigate(`/students/${id}`);
+      navigate('/students');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Update failed');
     } finally { setLoading(false); }
@@ -278,8 +278,8 @@ const StudentEdit: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <Link to={`/students/${id}`} className="btn btn-secondary btn-sm"><FiArrowLeft /></Link>
           <div>
-            <h1 className="page-title">Edit Student</h1>
-            <p className="page-subtitle">Update student information</p>
+            <h1 className="page-title">Edit Candidate</h1>
+            <p className="page-subtitle">Update candidate information</p>
           </div>
         </div>
       </div>
@@ -315,8 +315,8 @@ const StudentEdit: React.FC = () => {
               <input className="form-control" value={form.mobile || ''} onChange={set('mobile')} required maxLength={10} />
             </div>
             <div className="form-group">
-              <label className="form-label">Email Address *</label>
-              <input type="email" className="form-control" value={form.email || ''} onChange={set('email')} required />
+              <label className="form-label">Email Address <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+              <input type="email" className="form-control" value={form.email || ''} onChange={set('email')} />
             </div>
             <div className="form-group">
               <label className="form-label">Date of Birth</label>
@@ -340,14 +340,6 @@ const StudentEdit: React.FC = () => {
                 <input type="date" className="form-control" value={form.admission_date || ''} onChange={set('admission_date')} />
               </div>
               {form.admission_date && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{fmtDate(form.admission_date)}</div>}
-            </div>
-            <div className="form-group">
-              <label className="form-label">Status</label>
-              <select className="form-control" value={form.status || 'active'} onChange={set('status')}>
-                <option value="active">Active</option>
-                <option value="inactive">Inactive</option>
-                <option value="suspended">Suspended</option>
-              </select>
             </div>
           </div>
           <div className="form-group">

@@ -5,18 +5,17 @@ services:
     image: postgres:16-alpine
     container_name: epft-db
     environment:
-      POSTGRES_DB: epft
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: 12345
+      POSTGRES_DB: ${DB_NAME:-epft}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
-      - ./database/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d epft"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -31,12 +30,15 @@ services:
       NODE_ENV: production
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: epft
-      DB_USER: postgres
-      DB_PASSWORD: 12345
-      JWT_SECRET: epft_nalam_academy_super_secret_jwt_key_2024
-      JWT_EXPIRES_IN: 7d
-      FRONTEND_URL: http://localhost:3000
+      DB_NAME: ${DB_NAME:-epft}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      FRONTEND_URL: ${FRONTEND_URL:?Set FRONTEND_URL in .env}
+      SEED_DEFAULT_USERS: ${SEED_DEFAULT_USERS:-false}
+      SEED_SAMPLE_DATA: ${SEED_SAMPLE_DATA:-false}
+      DB_POOL_MAX: ${DB_POOL_MAX:-30}
     ports:
       - "5000:5000"
     volumes:

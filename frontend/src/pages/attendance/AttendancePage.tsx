@@ -1,291 +1,318 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { FiCalendar, FiCheck, FiBarChart2, FiUsers, FiUser, FiSearch } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../../api/axios';
-import { Student, Batch } from '../../types';
 
-type ReportMode = 'all' | 'batch' | 'individual';
+interface StudentRow {
+  id: number;
+  student_id: string;
+  full_name: string;
+}
+
+type ReportMode = 'overall' | 'individual';
 
 const AttendancePage: React.FC = () => {
+  /* ── Mark tab ── */
   const [tab, setTab] = useState<'mark' | 'report'>('mark');
-  const [batches, setBatches] = useState<Batch[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [selectedBatch, setSelectedBatch] = useState('');
+  const [students, setStudents] = useState<StudentRow[]>([]);
   const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
-  const [attendance, setAttendance] = useState<Record<number, string>>({});
+  const [attendance, setAttendance] = useState<Record<number, 'present' | 'absent'>>({});
   const [loading, setLoading] = useState(false);
+  const [studentsLoading, setStudentsLoading] = useState(false);
 
-  // Report state
-  const [reportMode, setReportMode] = useState<ReportMode>('all');
-  const [reportBatch, setReportBatch] = useState('');
+  /* ── Report tab ── */
+  const [reportMode, setReportMode] = useState<ReportMode>('overall');
+  const [allStudents, setAllStudents] = useState<StudentRow[]>([]);
   const [reportStudent, setReportStudent] = useState('');
-  const [reportMonth, setReportMonth] = useState(String(new Date().getMonth() + 1));
-  const [reportYear, setReportYear] = useState(String(new Date().getFullYear()));
   const [reportStartDate, setReportStartDate] = useState('');
   const [reportEndDate, setReportEndDate] = useState('');
-  const [reportDate, setReportDate] = useState(new Date().toISOString().split('T')[0]);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportSearch, setReportSearch] = useState('');
 
-  // Report data
-  const [allStudentsData, setAllStudentsData] = useState<any[]>([]);
-  const [batchSummary, setBatchSummary] = useState<any>(null);
-  const [batchStudentsData, setBatchStudentsData] = useState<any[]>([]);
-  const [reportData, setReportData] = useState<any[]>([]);
-  const [reportSummary, setReportSummary] = useState<any>(null);
+  /* ── Report data ── */
+  const [overallData, setOverallData] = useState<any[]>([]);
+  const [overallWorkingDays, setOverallWorkingDays] = useState(0);
+  const [indivData, setIndivData] = useState<any[]>([]);
+  const [indivSummary, setIndivSummary] = useState<any>(null);
 
+  /* Load active students for mark + report on mount */
   useEffect(() => {
-    api.get('/batches').then(r => setBatches(r.data.data));
-    api.get('/students').then(r => setStudents(r.data.data));
+    api.get('/students', { params: { status: 'active', limit: 1000 } })
+      .then(r => {
+        const list: StudentRow[] = r.data.data || [];
+        setAllStudents(list);
+      })
+      .catch(() => toast.error('Failed to load students'));
   }, []);
 
-  useEffect(() => {
-    if (selectedBatch) {
-      api.get(`/students?batch_id=${selectedBatch}&limit=100`).then(r => {
-        const s = r.data.data;
-        setStudents(s);
-        const init: Record<number, string> = {};
-        s.forEach((st: Student) => { init[st.id] = 'present'; });
-        setAttendance(init);
-      });
+  /* Load students + existing records when date changes */
+  const loadAttendance = useCallback(async () => {
+    setStudentsLoading(true);
+    try {
+      // Always use active students
+      const studRes = await api.get('/students', { params: { status: 'active', limit: 1000 } });
+      const s: StudentRow[] = studRes.data.data || [];
+      setStudents(s);
+
+      // Default everyone to present
+      const init: Record<number, 'present' | 'absent'> = {};
+      s.forEach(st => { init[st.id] = 'present'; });
+
+      // Overlay saved records for this date
+      if (s.length > 0 && attendanceDate) {
+        const attRes = await api.get('/attendance', { params: { attendance_date: attendanceDate } });
+        const existing: any[] = attRes.data.data || [];
+        existing.forEach((rec: any) => {
+          if (init.hasOwnProperty(rec.student_id)) {
+            init[rec.student_id] = rec.status === 'present' ? 'present' : 'absent';
+          }
+        });
+      }
+      setAttendance(init);
+    } catch {
+      toast.error('Failed to load attendance');
+    } finally {
+      setStudentsLoading(false);
     }
-  }, [selectedBatch]);
+  }, [attendanceDate]);
+
+  useEffect(() => { loadAttendance(); }, [loadAttendance]);
 
   const handleMark = async () => {
-    if (!selectedBatch || !attendanceDate) { toast.error('Select batch and date'); return; }
+    if (!attendanceDate) { toast.error('Select a date'); return; }
+    if (students.length === 0) { toast.error('No active students found'); return; }
     setLoading(true);
     try {
-      const records = Object.entries(attendance).map(([student_id, status]) => ({ student_id: parseInt(student_id), status }));
-      await api.post('/attendance', { batch_id: selectedBatch, attendance_date: attendanceDate, records });
-      toast.success(`Attendance marked for ${records.length} students!`);
-    } catch (err: any) { toast.error(err.response?.data?.message || 'Failed'); }
-    finally { setLoading(false); }
+      const records = Object.entries(attendance).map(([student_id, status]) => ({
+        student_id: parseInt(student_id),
+        status,
+      }));
+      await api.post('/attendance', { attendance_date: attendanceDate, records });
+      toast.success(`Attendance saved for ${records.length} students!`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to save attendance');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  // ── Fetch report data by mode ──────────────────────────────────────
+  const markAll = (status: 'present' | 'absent') => {
+    const all: Record<number, 'present' | 'absent'> = {};
+    students.forEach(st => { all[st.id] = status; });
+    setAttendance(all);
+  };
+
+  /* ── Fetch reports ── */
   const fetchReport = async () => {
     setReportLoading(true);
     try {
-      if (reportMode === 'all') {
+      if (reportMode === 'overall') {
         const params: any = {};
         if (reportStartDate) params.start_date = reportStartDate;
         if (reportEndDate)   params.end_date   = reportEndDate;
-        if (reportBatch)     params.batch_id   = reportBatch;
         const r = await api.get('/attendance/report/all', { params });
-        setAllStudentsData(r.data.data);
-        setBatchSummary(null);
-        setBatchStudentsData([]);
-        setReportData([]);
-        setReportSummary(null);
-
-      } else if (reportMode === 'batch') {
-        if (!reportBatch) { toast.error('Select a batch'); setReportLoading(false); return; }
-        const r = await api.get(`/attendance/report/batch/${reportBatch}`, { params: { date: reportDate } });
-        setBatchSummary(r.data.summary);
-        setBatchStudentsData(r.data.data);
-        setAllStudentsData([]);
-        setReportData([]);
-        setReportSummary(null);
-
+        setOverallData(r.data.data || []);
+        setOverallWorkingDays(r.data.working_days || 0);
+        setIndivData([]); setIndivSummary(null);
       } else {
-        if (!reportStudent) { toast.error('Select a student'); setReportLoading(false); return; }
-        const r = await api.get(`/attendance/report/student/${reportStudent}`, {
-          params: { month: reportMonth, year: reportYear },
-        });
-        setReportData(r.data.data);
-        setReportSummary(r.data.summary);
-        setAllStudentsData([]);
-        setBatchSummary(null);
-        setBatchStudentsData([]);
+        if (!reportStudent) { toast.error('Select a candidate'); setReportLoading(false); return; }
+        const params: any = {};
+        if (reportStartDate) params.start_date = reportStartDate;
+        if (reportEndDate)   params.end_date   = reportEndDate;
+        const r = await api.get(`/attendance/report/student/${reportStudent}`, { params });
+        setIndivData(r.data.data || []);
+        setIndivSummary(r.data.summary);
+        setOverallData([]); setOverallWorkingDays(0);
       }
-    } catch { toast.error('Failed to load report'); }
-    finally { setReportLoading(false); }
+    } catch {
+      toast.error('Failed to load report');
+    } finally {
+      setReportLoading(false);
+    }
   };
-
-  const statusColors: Record<string, string> = {
-    present: 'var(--teal)', absent: 'var(--red)', late: 'var(--amber)', excused: 'var(--accent)',
-  };
-
-  // Filter helpers
-  const filteredAll = allStudentsData.filter(s =>
-    !reportSearch ||
-    s.full_name.toLowerCase().includes(reportSearch.toLowerCase()) ||
-    s.student_code?.toLowerCase().includes(reportSearch.toLowerCase())
-  );
-  const filteredBatch = batchStudentsData.filter(s =>
-    !reportSearch ||
-    s.full_name.toLowerCase().includes(reportSearch.toLowerCase()) ||
-    s.student_code?.toLowerCase().includes(reportSearch.toLowerCase())
-  );
 
   const pctColor = (p: number) =>
     p >= 75 ? 'var(--teal)' : p >= 50 ? 'var(--amber)' : 'var(--red)';
+
+  const presentCount = Object.values(attendance).filter(v => v === 'present').length;
+  const absentCount  = Object.values(attendance).filter(v => v === 'absent').length;
+
+  const filteredOverall = overallData.filter(s =>
+    !reportSearch ||
+    s.full_name.toLowerCase().includes(reportSearch.toLowerCase()) ||
+    (s.student_code || '').toLowerCase().includes(reportSearch.toLowerCase())
+  );
 
   return (
     <div>
       <div className="page-header"><div><h1 className="page-title">Attendance</h1></div></div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
-        <button className={`btn ${tab === 'mark' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('mark')}><FiCalendar /> Mark Attendance</button>
-        <button className={`btn ${tab === 'report' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('report')}><FiBarChart2 /> Attendance Report</button>
+        <button className={`btn ${tab === 'mark' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('mark')}>
+          <FiCalendar /> Mark Attendance
+        </button>
+        <button className={`btn ${tab === 'report' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setTab('report')}>
+          <FiBarChart2 /> Attendance Report
+        </button>
       </div>
 
-      {/* ══════════════════════════════════════════════════════
-          MARK ATTENDANCE TAB (unchanged)
-      ══════════════════════════════════════════════════════ */}
+      {/* ══════════ MARK ATTENDANCE ══════════ */}
       {tab === 'mark' && (
         <div className="card">
-          <div className="form-grid" style={{ marginBottom: 20 }}>
-            <div className="form-group"><label className="form-label">Batch *</label>
-              <select className="form-control" value={selectedBatch} onChange={e => setSelectedBatch(e.target.value)}>
-                <option value="">Select Batch</option>
-                {batches.map(b => <option key={b.id} value={b.id}>{b.batch_name}</option>)}
-              </select>
-            </div>
-            <div className="form-group"><label className="form-label">Date *</label>
-              <input type="date" className="form-control" value={attendanceDate} onChange={e => setAttendanceDate(e.target.value)} />
+          <div className="form-grid" style={{ marginBottom: 20, gridTemplateColumns: '1fr' }}>
+            <div className="form-group" style={{ maxWidth: 280 }}>
+              <label className="form-label">Date *</label>
+              <input
+                type="date"
+                className="form-control"
+                value={attendanceDate}
+                onChange={e => setAttendanceDate(e.target.value)}
+              />
             </div>
           </div>
 
-          {students.length === 0 && selectedBatch
-            ? <div className="empty-state"><div className="empty-state-icon">👥</div><h3>No Students in this Batch</h3></div>
-            : students.length > 0 && (
-              <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{students.length} students</div>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    {['present', 'absent', 'late'].map(s => (
-                      <button key={s} className="btn btn-sm btn-secondary" onClick={() => {
-                        const all: Record<number, string> = {};
-                        students.forEach(st => { all[st.id] = s; });
-                        setAttendance(all);
-                      }} style={{ textTransform: 'capitalize' }}>All {s}</button>
-                    ))}
-                  </div>
+          {studentsLoading && (
+            <div className="empty-state">
+              <div className="empty-state-icon">⏳</div>
+              <h3>Loading students...</h3>
+            </div>
+          )}
+
+          {!studentsLoading && students.length === 0 && (
+            <div className="empty-state">
+              <div className="empty-state-icon">👥</div>
+              <h3>No Active Candidates</h3>
+              <p>No active students found in the system.</p>
+            </div>
+          )}
+
+          {!studentsLoading && students.length > 0 && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>
+                  {students.length} student{students.length !== 1 ? 's' : ''}
+                  &nbsp;·&nbsp;
+                  <span style={{ color: 'var(--teal)', fontWeight: 600 }}>{presentCount} present</span>
+                  &nbsp;·&nbsp;
+                  <span style={{ color: 'var(--red)', fontWeight: 600 }}>{absentCount} absent</span>
                 </div>
-                <div className="attendance-grid">
-                  {students.map(s => (
-                    <div key={s.id} className="attendance-item attendance-item-vertical">
-                      <div className="student-avatar" style={{ width: 44, height: 44, fontSize: 16, margin: '0 auto 8px' }}>{s.full_name.charAt(0)}</div>
-                      <div style={{ textAlign: 'center', marginBottom: 10 }}>
-                        <div style={{ fontWeight: 600, fontSize: 13 }}>{s.full_name}</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn btn-sm btn-secondary" onClick={() => markAll('present')}>All Present</button>
+                  <button className="btn btn-sm btn-secondary" onClick={() => markAll('absent')}>All Absent</button>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {students.map(s => {
+                  const status = attendance[s.id] || 'present';
+                  return (
+                    <div key={s.id} className="attendance-item" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px' }}>
+                      <div className="student-avatar" style={{ width: 40, height: 40, fontSize: 15, flexShrink: 0 }}>
+                        {s.full_name.charAt(0)}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.full_name}</div>
                         <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.student_id}</div>
                       </div>
-                      <select
-                        className="attendance-select"
-                        value={attendance[s.id] || 'present'}
-                        onChange={e => setAttendance(a => ({ ...a, [s.id]: e.target.value }))}
-                        style={{ color: statusColors[attendance[s.id] || 'present'], width: '100%' }}
-                      >
-                        <option value="present">Present</option>
-                        <option value="absent">Absent</option>
-                        <option value="late">Late</option>
-                        <option value="excused">Excused</option>
-                      </select>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        <button
+                          onClick={() => setAttendance(a => ({ ...a, [s.id]: 'present' }))}
+                          style={{
+                            width: 44,
+                            padding: '5px 0',
+                            borderRadius: 6,
+                            border: '2px solid',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: 12,
+                            borderColor: status === 'present' ? 'var(--teal)' : 'var(--border)',
+                            background: status === 'present' ? 'var(--teal)' : 'transparent',
+                            color: status === 'present' ? '#fff' : 'var(--text-secondary)',
+                            transition: 'all 0.15s',
+                          }}
+                        >P</button>
+                        <button
+                          onClick={() => setAttendance(a => ({ ...a, [s.id]: 'absent' }))}
+                          style={{
+                            width: 44,
+                            padding: '5px 0',
+                            borderRadius: 6,
+                            border: '2px solid',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: 12,
+                            borderColor: status === 'absent' ? 'var(--red)' : 'var(--border)',
+                            background: status === 'absent' ? 'var(--red)' : 'transparent',
+                            color: status === 'absent' ? '#fff' : 'var(--text-secondary)',
+                            transition: 'all 0.15s',
+                          }}
+                        >A</button>
+                      </div>
                     </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
-                  <button className="btn btn-primary" onClick={handleMark} disabled={loading}><FiCheck /> {loading ? 'Saving...' : 'Save Attendance'}</button>
-                </div>
-              </>
-            )}
-          {!selectedBatch && <div className="empty-state"><div className="empty-state-icon">📋</div><h3>Select a Batch</h3><p>Choose a batch to mark attendance.</p></div>}
+                  );
+                })}
+              </div>
+
+              <div style={{ marginTop: 20, display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="btn btn-primary" onClick={handleMark} disabled={loading}>
+                  <FiCheck /> {loading ? 'Saving...' : 'Save Attendance'}
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════
-          ATTENDANCE REPORT TAB
-      ══════════════════════════════════════════════════════ */}
+      {/* ══════════ REPORT TAB ══════════ */}
       {tab === 'report' && (
         <div>
-          {/* Mode selector */}
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 20 }}>
-              <button
-                className={`btn ${reportMode === 'all' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setReportMode('all')}
-              >
-                <FiUsers /> All Students
+              <button className={`btn ${reportMode === 'overall' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setReportMode('overall')}>
+                <FiUsers /> Overall Report
               </button>
-              <button
-                className={`btn ${reportMode === 'batch' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setReportMode('batch')}
-              >
-                <FiBarChart2 /> Batch-wise
-              </button>
-              <button
-                className={`btn ${reportMode === 'individual' ? 'btn-primary' : 'btn-secondary'}`}
-                onClick={() => setReportMode('individual')}
-              >
+              <button className={`btn ${reportMode === 'individual' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setReportMode('individual')}>
                 <FiUser /> Individual Student
               </button>
             </div>
 
-            {/* ── All Students filters ── */}
-            {reportMode === 'all' && (
-              <div className="form-grid">
-                <div className="form-group"><label className="form-label">Batch (optional)</label>
-                  <select className="form-control" value={reportBatch} onChange={e => setReportBatch(e.target.value)}>
-                    <option value="">All Batches</option>
-                    {batches.map(b => <option key={b.id} value={b.id}>{b.batch_name}</option>)}
-                  </select>
-                </div>
-                <div className="form-group"><label className="form-label">From Date</label>
-                  <input type="date" className="form-control" value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} />
-                </div>
-                <div className="form-group"><label className="form-label">To Date</label>
-                  <input type="date" className="form-control" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} />
-                </div>
-              </div>
-            )}
-
-            {/* ── Batch-wise filters ── */}
-            {reportMode === 'batch' && (
-              <div className="form-grid">
-                <div className="form-group"><label className="form-label">Batch *</label>
-                  <select className="form-control" value={reportBatch} onChange={e => setReportBatch(e.target.value)}>
-                    <option value="">Select Batch</option>
-                    {batches.map(b => <option key={b.id} value={b.id}>{b.batch_name}</option>)}
-                  </select>
-                </div>
-                <div className="form-group"><label className="form-label">Date</label>
-                  <input type="date" className="form-control" value={reportDate} onChange={e => setReportDate(e.target.value)} />
-                </div>
-              </div>
-            )}
-
-            {/* ── Individual Student filters ── */}
-            {reportMode === 'individual' && (
-              <div className="form-grid">
-                <div className="form-group"><label className="form-label">Student *</label>
+            <div className="form-grid">
+              {reportMode === 'individual' && (
+                <div className="form-group">
+                  <label className="form-label">Student *</label>
                   <select className="form-control" value={reportStudent} onChange={e => setReportStudent(e.target.value)}>
-                    <option value="">Select Student</option>
-                    {students.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                    <option value="">Select Candidate</option>
+                    {allStudents.map(s => (
+                      <option key={s.id} value={s.id}>{s.full_name} ({s.student_id})</option>
+                    ))}
                   </select>
                 </div>
-                <div className="form-group"><label className="form-label">Month</label>
-                  <select className="form-control" value={reportMonth} onChange={e => setReportMonth(e.target.value)}>
-                    {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m,i) =>
-                      <option key={i+1} value={i+1}>{m}</option>)}
-                  </select>
-                </div>
-                <div className="form-group"><label className="form-label">Year</label>
-                  <input type="number" className="form-control" value={reportYear} onChange={e => setReportYear(e.target.value)} min={2020} max={2030} />
-                </div>
+              )}
+              <div className="form-group">
+                <label className="form-label">From Date</label>
+                <input type="date" className="form-control" value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} />
               </div>
-            )}
+              <div className="form-group">
+                <label className="form-label">To Date</label>
+                <input type="date" className="form-control" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} />
+              </div>
+            </div>
 
             <button className="btn btn-primary" onClick={fetchReport} disabled={reportLoading} style={{ marginTop: 4 }}>
               {reportLoading ? 'Loading...' : '🔍 Get Report'}
             </button>
           </div>
 
-          {/* ── ALL STUDENTS REPORT ── */}
-          {reportMode === 'all' && allStudentsData.length > 0 && (
+          {/* OVERALL REPORT */}
+          {reportMode === 'overall' && overallData.length > 0 && (
             <div className="card">
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-                <h3 style={{ fontWeight: 700, fontSize: 16 }}>All Students — Attendance Summary</h3>
+                <div>
+                  <h3 style={{ fontWeight: 700, fontSize: 16, margin: 0 }}>Overall Attendance Summary</h3>
+                  <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
+                    Working Days: <strong style={{ color: 'var(--accent)' }}>{overallWorkingDays}</strong>
+                  </div>
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-tertiary)', borderRadius: 8, padding: '6px 12px' }}>
                   <FiSearch size={14} color="var(--text-muted)" />
                   <input
@@ -301,29 +328,25 @@ const AttendancePage: React.FC = () => {
                 <table>
                   <thead>
                     <tr>
-                      <th>Student</th>
+                      <th>Candidate</th>
                       <th>Batch</th>
+                      <th style={{ textAlign: 'center' }}>Working Days</th>
                       <th style={{ textAlign: 'center' }}>Present</th>
                       <th style={{ textAlign: 'center' }}>Absent</th>
-                      <th style={{ textAlign: 'center' }}>Late</th>
-                      <th style={{ textAlign: 'center' }}>Excused</th>
-                      <th style={{ textAlign: 'center' }}>Total Days</th>
                       <th style={{ textAlign: 'center' }}>Attendance %</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredAll.map((s: any) => (
+                    {filteredOverall.map((s: any) => (
                       <tr key={s.id}>
                         <td>
                           <div style={{ fontWeight: 600, fontSize: 13 }}>{s.full_name}</div>
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.student_code}</div>
                         </td>
                         <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.batch_name || '—'}</td>
+                        <td style={{ textAlign: 'center' }}>{overallWorkingDays}</td>
                         <td style={{ textAlign: 'center' }}><span style={{ color: 'var(--teal)', fontWeight: 700 }}>{s.present}</span></td>
                         <td style={{ textAlign: 'center' }}><span style={{ color: 'var(--red)', fontWeight: 700 }}>{s.absent}</span></td>
-                        <td style={{ textAlign: 'center' }}><span style={{ color: 'var(--amber)', fontWeight: 700 }}>{s.late}</span></td>
-                        <td style={{ textAlign: 'center' }}><span style={{ color: 'var(--accent)', fontWeight: 700 }}>{s.excused}</span></td>
-                        <td style={{ textAlign: 'center' }}>{s.total_days}</td>
                         <td style={{ textAlign: 'center' }}>
                           <span style={{ fontWeight: 700, color: pctColor(s.percentage) }}>{s.percentage}%</span>
                         </td>
@@ -335,90 +358,15 @@ const AttendancePage: React.FC = () => {
             </div>
           )}
 
-          {/* ── BATCH-WISE REPORT ── */}
-          {reportMode === 'batch' && batchSummary && (
-            <div>
-              {/* Summary cards */}
-              <div className="stats-grid" style={{ marginBottom: 16 }}>
-                {[
-                  { label: 'Total Students', value: batchSummary.total_students, color: 'var(--accent)' },
-                  { label: 'Present Today',  value: batchSummary.present_today,  color: 'var(--teal)' },
-                  { label: 'Absent Today',   value: batchSummary.absent_today,   color: 'var(--red)' },
-                  { label: 'Late Today',     value: batchSummary.late_today,     color: 'var(--amber)' },
-                  { label: 'Attendance %',   value: `${batchSummary.percentage}%`, color: pctColor(batchSummary.percentage) },
-                ].map((card, i) => (
-                  <div key={i} className="stat-card" style={{ '--card-accent': card.color } as React.CSSProperties}>
-                    <div className="stat-value">{card.value}</div>
-                    <div className="stat-label">{card.label}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="card">
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-                  <h3 style={{ fontWeight: 700, fontSize: 16 }}>Batch Student Breakdown — {new Date(batchSummary.date + 'T00:00:00').toLocaleDateString()}</h3>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-tertiary)', borderRadius: 8, padding: '6px 12px' }}>
-                    <FiSearch size={14} color="var(--text-muted)" />
-                    <input
-                      className="form-control"
-                      style={{ border: 'none', background: 'transparent', padding: 0, minWidth: 180 }}
-                      placeholder="Search student..."
-                      value={reportSearch}
-                      onChange={e => setReportSearch(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="table-container">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Student</th>
-                        <th style={{ textAlign: 'center' }}>Today</th>
-                        <th style={{ textAlign: 'center' }}>Present</th>
-                        <th style={{ textAlign: 'center' }}>Absent</th>
-                        <th style={{ textAlign: 'center' }}>Late</th>
-                        <th style={{ textAlign: 'center' }}>Excused</th>
-                        <th style={{ textAlign: 'center' }}>Attendance %</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredBatch.map((s: any) => (
-                        <tr key={s.id}>
-                          <td>
-                            <div style={{ fontWeight: 600, fontSize: 13 }}>{s.full_name}</div>
-                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.student_code}</div>
-                          </td>
-                          <td style={{ textAlign: 'center' }}>
-                            {s.today_status === 'not_marked'
-                              ? <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>—</span>
-                              : <span className={`badge badge-${s.today_status}`}>{s.today_status}</span>}
-                          </td>
-                          <td style={{ textAlign: 'center' }}><span style={{ color: 'var(--teal)', fontWeight: 700 }}>{s.present}</span></td>
-                          <td style={{ textAlign: 'center' }}><span style={{ color: 'var(--red)', fontWeight: 700 }}>{s.absent}</span></td>
-                          <td style={{ textAlign: 'center' }}><span style={{ color: 'var(--amber)', fontWeight: 700 }}>{s.late}</span></td>
-                          <td style={{ textAlign: 'center' }}><span style={{ color: 'var(--accent)', fontWeight: 700 }}>{s.excused}</span></td>
-                          <td style={{ textAlign: 'center' }}>
-                            <span style={{ fontWeight: 700, color: pctColor(s.percentage) }}>{s.percentage}%</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── INDIVIDUAL STUDENT REPORT ── */}
-          {reportMode === 'individual' && reportSummary && (
+          {/* INDIVIDUAL REPORT */}
+          {reportMode === 'individual' && indivSummary && (
             <div className="card">
               <div className="stats-grid" style={{ marginBottom: 20 }}>
                 {[
-                  { label: 'Total Days',   value: reportSummary.total,      color: 'var(--accent)' },
-                  { label: 'Present',      value: reportSummary.present,    color: 'var(--teal)' },
-                  { label: 'Absent',       value: reportSummary.absent,     color: 'var(--red)' },
-                  { label: 'Late',         value: reportSummary.late,       color: 'var(--amber)' },
-                  { label: 'Attendance %', value: `${reportSummary.percentage}%`, color: pctColor(reportSummary.percentage) },
+                  { label: 'Working Days', value: indivSummary.working_days, color: 'var(--accent)' },
+                  { label: 'Present',      value: indivSummary.present,      color: 'var(--teal)' },
+                  { label: 'Absent',       value: indivSummary.absent,       color: 'var(--red)' },
+                  { label: 'Attendance %', value: `${indivSummary.percentage}%`, color: pctColor(indivSummary.percentage) },
                 ].map((s, i) => (
                   <div key={i} className="stat-card" style={{ '--card-accent': s.color } as React.CSSProperties}>
                     <div className="stat-value">{s.value}</div>
@@ -428,13 +376,16 @@ const AttendancePage: React.FC = () => {
               </div>
               <div className="table-container">
                 <table>
-                  <thead><tr><th>Date</th><th>Status</th><th>Notes</th></tr></thead>
+                  <thead>
+                    <tr><th>Date</th><th>Status</th></tr>
+                  </thead>
                   <tbody>
-                    {reportData.map(r => (
-                      <tr key={r.id}>
-                        <td>{new Date(r.attendance_date).toLocaleDateString()}</td>
-                        <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
-                        <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.notes || '—'}</td>
+                    {indivData.map((r: any, i: number) => (
+                      <tr key={r.id ?? i}>
+                        <td>{new Date(r.attendance_date + 'T00:00:00').toLocaleDateString()}</td>
+                        <td>
+                          <span className={`badge badge-${r.status}`}>{r.status}</span>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -444,14 +395,11 @@ const AttendancePage: React.FC = () => {
           )}
 
           {/* Empty states */}
-          {reportMode === 'all' && !reportLoading && allStudentsData.length === 0 && (
-            <div className="card"><div className="empty-state"><div className="empty-state-icon">📊</div><h3>No Report Yet</h3><p>Set filters and click "Get Report" to view attendance data.</p></div></div>
+          {reportMode === 'overall' && !reportLoading && overallData.length === 0 && (
+            <div className="card"><div className="empty-state"><div className="empty-state-icon">📊</div><h3>No Report Yet</h3><p>Click "Get Report" to view attendance data.</p></div></div>
           )}
-          {reportMode === 'batch' && !reportLoading && !batchSummary && (
-            <div className="card"><div className="empty-state"><div className="empty-state-icon">📋</div><h3>Select a Batch</h3><p>Choose a batch and date, then click "Get Report".</p></div></div>
-          )}
-          {reportMode === 'individual' && !reportLoading && !reportSummary && (
-            <div className="card"><div className="empty-state"><div className="empty-state-icon">👤</div><h3>Select a Student</h3><p>Choose a student and month, then click "Get Report".</p></div></div>
+          {reportMode === 'individual' && !reportLoading && !indivSummary && (
+            <div className="card"><div className="empty-state"><div className="empty-state-icon">👤</div><h3>Select a Student</h3><p>Choose a student and optional date range, then click "Get Report".</p></div></div>
           )}
         </div>
       )}

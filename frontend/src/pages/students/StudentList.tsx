@@ -162,12 +162,12 @@ const StudentList: React.FC = () => {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Students</h1>
-          <p className="page-subtitle">{total} total students</p>
+          <h1 className="page-title">Candidates</h1>
+          <p className="page-subtitle">{total} total candidates</p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {isAdmin && <button className="btn btn-secondary" onClick={handleExport}><FiDownload /> Export CSV</button>}
-          {isAdmin && <Link to="/students/add" className="btn btn-primary"><FiPlus /> Add Student</Link>}
+          {isAdmin && <Link to="/students/add" className="btn btn-primary"><FiPlus /> Add Candidate</Link>}
         </div>
       </div>
 
@@ -189,8 +189,6 @@ const StudentList: React.FC = () => {
           <select className="form-control filter-select" value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setPage(1); }}>
             <option value="">All Status</option>
             <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="suspended">Suspended</option>
           </select>
         </div>
 
@@ -199,15 +197,15 @@ const StudentList: React.FC = () => {
         ) : students.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">👥</div>
-            <h3>No Students Found</h3>
-            <p>Add your first student to get started.</p>
+            <h3>No Candidates Found</h3>
+            <p>Add your first candidate to get started.</p>
           </div>
         ) : (
           <div className="table-container">
             <table>
               <thead>
                 <tr>
-                  <th>Student</th>
+                  <th>Candidate</th>
                   <th>ID</th>
                   <th>Mobile</th>
                   <th>Course</th>
@@ -244,7 +242,7 @@ const StudentList: React.FC = () => {
                           <Link to={`/students/${s.id}/edit`} className="action-btn edit" title="Edit"><FiEdit2 /></Link>
                           <button
                             className="action-btn delete"
-                            title="Discontinue Student"
+                            title="Discontinue Candidate"
                             onClick={() => openDiscontinueModal(s)}
                             style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}
                           >
@@ -283,7 +281,7 @@ const StudentList: React.FC = () => {
             {/* ── Header ── */}
             <div className="modal-header" style={{ borderBottom: '2px solid rgba(239,68,68,0.25)', flexWrap: 'wrap', gap: 8 }}>
               <h2 className="modal-title" style={{ color: '#ef4444', display: 'flex', alignItems: 'center', gap: 8, fontSize: 'clamp(15px, 3vw, 18px)' }}>
-                <FiAlertTriangle /> Discontinue Student — Step 1 of 2
+                <FiAlertTriangle /> Discontinue Candidate — Step 1 of 2
               </h2>
               <button className="modal-close" onClick={() => setShowDiscontinueModal(false)}><FiX /></button>
             </div>
@@ -291,7 +289,7 @@ const StudentList: React.FC = () => {
             {detailsLoading ? (
               <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-muted)' }}>
                 <div style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTopColor: 'var(--accent)', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
-                Loading student details…
+                Loading candidate details…
               </div>
             ) : discontinueDetails ? (
               <div style={{ maxHeight: '74vh', overflowY: 'auto', paddingRight: 2 }}>
@@ -389,7 +387,7 @@ const StudentList: React.FC = () => {
                         Outstanding Dues: ₹{Number(discontinueDetails.pendingDues).toLocaleString()}
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                        This student has unpaid fees. It is recommended to clear dues before discontinuing.
+                        This candidate has unpaid fees. It is recommended to clear dues before discontinuing.
                         You may still proceed by clicking <strong>"Discontinue Anyway"</strong>.
                       </div>
                     </div>
@@ -477,7 +475,7 @@ const StudentList: React.FC = () => {
               </div>
 
               <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20, lineHeight: 1.6 }}>
-                Confirm which original certificates have been collected from this student. These are saved permanently and cannot be changed after discontinuation.
+                Confirm which original certificates have been collected from this candidate. These are saved permanently and cannot be changed after discontinuation.
               </p>
 
               {/* ── 3 Certificate checkboxes — original certs only ── */}

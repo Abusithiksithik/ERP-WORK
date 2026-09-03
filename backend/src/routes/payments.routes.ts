@@ -18,12 +18,13 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         c.course_name,
         cc.category_name,
         e.total_fee,
+        COALESCE(e.discount, 0) AS enrollment_discount,
         COALESCE(
           (SELECT SUM(p2.amount) FROM payments p2
            WHERE p2.enrollment_id = p.enrollment_id AND p2.status = 'verified'), 0
         ) AS total_paid_for_enrollment,
         GREATEST(
-          COALESCE(e.total_fee, 0) -
+          COALESCE(e.total_fee, 0) - COALESCE(e.discount, 0) -
           COALESCE(
             (SELECT SUM(p2.amount) FROM payments p2
              WHERE p2.enrollment_id = p.enrollment_id AND p2.status = 'verified'), 0
@@ -60,6 +61,24 @@ router.post('/', authorize('super_admin', 'admin', 'incharge'), async (req: Auth
     if (!student_id || !amount || Number(amount) <= 0) {
       res.status(400).json({ success: false, message: 'student_id and a positive amount are required' });
       return;
+    }
+    if (enrollment_id) {
+      const enrollmentCheck = await query(
+        'SELECT student_id, status FROM enrollments WHERE id=$1',
+        [enrollment_id]
+      );
+      if (enrollmentCheck.rows.length === 0) {
+        res.status(400).json({ success: false, message: 'Enrollment not found' });
+        return;
+      }
+      if (Number(enrollmentCheck.rows[0].student_id) !== Number(student_id)) {
+        res.status(400).json({ success: false, message: 'Payment student does not match enrollment student' });
+        return;
+      }
+      if (enrollmentCheck.rows[0].status !== 'approved') {
+        res.status(400).json({ success: false, message: 'Payments can only be recorded for approved enrollments' });
+        return;
+      }
     }
 
     // Auto-verify since this is a manual admin entry

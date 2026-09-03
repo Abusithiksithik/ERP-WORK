@@ -21,12 +21,13 @@ router.get('/', authorize('super_admin', 'admin', 'incharge', 'teacher'), async 
         COALESCE(e.course_fee, 0)                               AS course_fee,
         COALESCE(e.materials_fee, 0)                            AS materials_fee,
         COALESCE(e.total_fee, 0)                                AS total_fee,
+        COALESCE(e.discount, 0)                                  AS discount,
         COALESCE(
           (SELECT SUM(p.amount) FROM payments p
            WHERE p.enrollment_id = e.id AND p.status = 'verified'), 0
         )                                                       AS amount_paid,
         GREATEST(
-          COALESCE(e.total_fee, 0) - COALESCE(
+          COALESCE(e.total_fee, 0) - COALESCE(e.discount, 0) - COALESCE(
             (SELECT SUM(p.amount) FROM payments p
              WHERE p.enrollment_id = e.id AND p.status = 'verified'), 0
           ), 0
@@ -40,7 +41,13 @@ router.get('/', authorize('super_admin', 'admin', 'incharge', 'teacher'), async 
     const params: unknown[] = [];
     if (student_id) { params.push(student_id); q += ` AND e.student_id=$${params.length}`; }
     if (course_id)  { params.push(course_id);  q += ` AND e.course_id=$${params.length}`;  }
-    if (status)     { params.push(status);      q += ` AND e.status=$${params.length}`;     }
+    if (status) {
+      // Filter by enrollment status directly (approved or discontinued)
+      params.push(status);
+      q += ` AND e.status=$${params.length}`;
+    }
+    // No default exclusion: show all enrollments regardless of student status.
+    // Discontinued enrollments (e.status='discontinued') are shown when explicitly requested.
     q += ' ORDER BY e.created_at DESC';
     const result = await query(q, params);
     res.json({ success: true, data: result.rows });
@@ -60,6 +67,16 @@ router.post('/', authorize('super_admin', 'admin'), async (req: AuthRequest, res
     if (!student_id || !course_id) {
       res.status(400).json({ success: false, message: 'student_id and course_id required' });
       return;
+    }
+    if (batch_id) {
+      const batchCheck = await query(
+        'SELECT 1 FROM batches WHERE id=$1 AND course_id=$2',
+        [batch_id, course_id]
+      );
+      if (batchCheck.rows.length === 0) {
+        res.status(400).json({ success: false, message: 'Selected batch does not belong to the selected course' });
+        return;
+      }
     }
     const existing = await query(
       'SELECT id FROM enrollments WHERE student_id=$1 AND course_id=$2',
@@ -109,11 +126,12 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
         COALESCE(e.course_fee,0)      AS course_fee,
         COALESCE(e.materials_fee,0)   AS materials_fee,
         COALESCE(e.total_fee,0)       AS total_fee,
+        COALESCE(e.discount,0)        AS discount,
         COALESCE(
           (SELECT SUM(p.amount) FROM payments p WHERE p.enrollment_id = e.id AND p.status='verified'), 0
         ) AS amount_paid,
         GREATEST(
-          COALESCE(e.total_fee,0) - COALESCE(
+          COALESCE(e.total_fee,0) - COALESCE(e.discount,0) - COALESCE(
             (SELECT SUM(p.amount) FROM payments p WHERE p.enrollment_id = e.id AND p.status='verified'), 0
           ), 0
         ) AS balance_amount
@@ -140,6 +158,21 @@ router.get('/:id', async (req: AuthRequest, res: Response) => {
 router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { batch_id, notes, application_fee, course_fee, materials_fee } = req.body;
+    if (batch_id) {
+      const enrollmentCheck = await query('SELECT course_id FROM enrollments WHERE id=$1', [req.params.id]);
+      if (enrollmentCheck.rows.length === 0) {
+        res.status(404).json({ success: false, message: 'Not found' });
+        return;
+      }
+      const batchCheck = await query(
+        'SELECT 1 FROM batches WHERE id=$1 AND course_id=$2',
+        [batch_id, enrollmentCheck.rows[0].course_id]
+      );
+      if (batchCheck.rows.length === 0) {
+        res.status(400).json({ success: false, message: 'Selected batch does not belong to this enrollment course' });
+        return;
+      }
+    }
     const result = await query(
       `UPDATE enrollments
        SET batch_id=$1, notes=$2,
@@ -164,6 +197,38 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
   }
 });
 
+// POST /api/enrollments/:id/discount — apply a course discount
+router.post('/:id/discount', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const recordId = Number(req.params.id);
+    const discountAmt = Number(req.body?.discount);
+    if (!Number.isFinite(discountAmt) || discountAmt < 0) {
+      res.status(400).json({ success: false, message: 'Discount must be 0 or more' });
+      return;
+    }
+    const result = await query(
+      `UPDATE enrollments
+       SET discount = LEAST($1, COALESCE(total_fee, 0))
+       WHERE id = $2
+       RETURNING *, COALESCE(total_fee,0)::numeric AS total_fee,
+         discount::numeric AS discount,
+         GREATEST(COALESCE(total_fee,0) - COALESCE(discount,0) - COALESCE((
+           SELECT SUM(p.amount) FROM payments p
+           WHERE p.enrollment_id = enrollments.id AND p.status='verified'
+         ),0),0)::numeric AS balance_amount`,
+      [discountAmt, recordId]
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Enrollment not found' });
+      return;
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('POST /enrollments/:id/discount error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // PATCH /api/enrollments/:id/approve
 router.patch('/:id/approve', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
@@ -183,22 +248,10 @@ router.patch('/:id/approve', authorize('super_admin', 'admin'), async (req: Auth
 });
 
 // PATCH /api/enrollments/:id/reject
-router.patch('/:id/reject', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
-  try {
-    const { notes } = req.body;
-    const result = await query(
-      `UPDATE enrollments SET status='rejected', notes=$1 WHERE id=$2 RETURNING *`,
-      [notes || null, req.params.id]
-    );
-    if (result.rows.length === 0) {
-      res.status(404).json({ success: false, message: 'Not found' });
-      return;
-    }
-    res.json({ success: true, data: result.rows[0] });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
+router.patch('/:id/reject', authorize('super_admin', 'admin'), async (_req: AuthRequest, res: Response) => {
+  // Legacy endpoint retained for compatibility. Current schema allows only
+  // approved/discontinued enrollment states.
+  res.status(409).json({ success: false, message: 'Enrollment rejection is no longer supported; use discontinue instead.' });
 });
 
 // GET /api/enrollments/student/:studentId/progress

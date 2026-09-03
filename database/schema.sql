@@ -13,7 +13,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     full_name VARCHAR(150) NOT NULL,
-    email VARCHAR(150) UNIQUE NOT NULL,
+    email VARCHAR(150) UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) NOT NULL CHECK (role IN ('super_admin', 'admin', 'incharge', 'teacher', 'student')),
     is_active BOOLEAN DEFAULT true,
@@ -116,7 +116,7 @@ CREATE TABLE IF NOT EXISTS students (
     user_id INTEGER UNIQUE REFERENCES users(id) ON DELETE SET NULL,
     full_name VARCHAR(150) NOT NULL,
     mobile VARCHAR(15) NOT NULL,
-    email VARCHAR(150) UNIQUE NOT NULL,
+    email VARCHAR(150) UNIQUE,
     date_of_birth DATE,
     gender VARCHAR(10) CHECK (gender IN ('Male', 'Female', 'Other')),
     address TEXT,
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS students (
     course_id INTEGER REFERENCES courses(id) ON DELETE SET NULL,
     batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
     admission_date DATE DEFAULT CURRENT_DATE,
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'suspended', 'discontinued')),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'discontinued')),
     discontinued_at TIMESTAMPTZ,
     discontinued_reason TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -169,11 +169,11 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- Update CHECK constraint to include 'discontinued'
+-- Ensure students status constraint is correct (idempotent)
 DO $$ BEGIN
   ALTER TABLE students DROP CONSTRAINT IF EXISTS students_status_check;
   ALTER TABLE students ADD CONSTRAINT students_status_check
-    CHECK (status IN ('active', 'inactive', 'suspended', 'discontinued'));
+    CHECK (status IN ('active', 'discontinued'));
 EXCEPTION WHEN others THEN NULL;
 END $$;
 
@@ -257,6 +257,9 @@ CREATE TABLE IF NOT EXISTS payment_methods (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX IF NOT EXISTS idx_payment_methods_enabled ON payment_methods(is_enabled);
+
+
 -- ============================================================
 -- ENROLLMENTS TABLE
 -- ============================================================
@@ -265,15 +268,24 @@ CREATE TABLE IF NOT EXISTS enrollments (
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     course_id INTEGER NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
     batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'completed')),
+    status VARCHAR(20) DEFAULT 'approved' CHECK (status IN ('approved', 'discontinued')),
     enrolled_at TIMESTAMPTZ DEFAULT NOW(),
     approved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     approved_at TIMESTAMPTZ,
     notes TEXT,
-    application_fee NUMERIC(10,2) DEFAULT 0,
-    course_fee NUMERIC(10,2) DEFAULT 0,
-    materials_fee NUMERIC(10,2) DEFAULT 0,
-    total_fee NUMERIC(10,2) GENERATED ALWAYS AS (COALESCE(application_fee,0) + COALESCE(course_fee,0) + COALESCE(materials_fee,0)) STORED,
+
+
+
+
+
+
+
+
+
+    -- application_fee NUMERIC(10,2) DEFAULT 0,
+    -- -- course_fee NUMERIC(10,2) DEFAULT 0,
+    -- materials_fee NUMERIC(10,2) DEFAULT 0,
+    -- total_fee NUMERIC(10,2) GENERATED ALWAYS AS (COALESCE(application_fee,0) + COALESCE(course_fee,0) + COALESCE(materials_fee,0)) STORED,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(student_id, course_id)
@@ -330,10 +342,11 @@ CREATE TABLE IF NOT EXISTS attendance (
     student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL,
     attendance_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    status VARCHAR(20) DEFAULT 'present' CHECK (status IN ('present', 'absent', 'late', 'excused')),
+    status VARCHAR(20) DEFAULT 'present' CHECK (status IN ('present', 'absent')),
     marked_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(student_id, attendance_date)
 );
 

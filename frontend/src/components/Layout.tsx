@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   FiHome, FiUsers, FiVideo, FiUser, FiLogOut, FiMenu, FiX, FiUserCheck,
   FiCreditCard, FiCalendar, FiAlertCircle, FiUserX, FiDollarSign, FiSettings,
-  FiBookOpen, FiLayers, FiChevronDown, FiChevronRight,
+  FiBookOpen, FiLayers, FiChevronDown, FiChevronRight, FiFileText, FiUserPlus,
 } from 'react-icons/fi';
 
 const Layout: React.FC = () => {
@@ -49,7 +49,11 @@ const Layout: React.FC = () => {
   // Main nav items (without items moved to Settings)
   const navItems = [
     {
-      to: '/students', icon: <FiUsers />, label: 'Students',
+      to: '/new-admissions', icon: <FiUserPlus />, label: 'New Admission',
+      show: isAdmin || isIncharge,
+    },
+    {
+      to: '/students', icon: <FiUsers />, label: 'Candidates',
       show: isAdmin || isIncharge || isTeacher,
     },
     {
@@ -69,7 +73,11 @@ const Layout: React.FC = () => {
       show: isAdmin,
     },
     {
-      to: '/discontinued-students', icon: <FiUserX />, label: 'Discontinue',
+      to: '/exam-fees', icon: <FiFileText />, label: 'Exam Fees',
+      show: isAdmin || isIncharge,
+    },
+    {
+      to: '/discontinued-students', icon: <FiUserX />, label: 'Discontinued',
       show: isAdmin,
     },
     {

@@ -21,8 +21,8 @@ function validateStudentInput(body: any): string | null {
   if (!mobile) return 'Mobile number is required';
   if (!MOBILE_REGEX.test(String(mobile).trim()))
     return 'Invalid Mobile Number — must be 10 digits starting with 6, 7, 8, or 9';
-  if (!email) return 'Email is required';
-  if (!EMAIL_REGEX.test(String(email).trim().toLowerCase()))
+  // email is optional — only validate format if provided
+  if (email && String(email).trim() !== '' && !EMAIL_REGEX.test(String(email).trim().toLowerCase()))
     return 'Invalid Email Address';
   return null;
 }
@@ -279,6 +279,13 @@ router.post('/:id/restore', authorize('super_admin', 'admin'), async (req: AuthR
 // ── GET /api/students/:id ──────────────────────────────────────────────
 router.get('/:id', authorize('super_admin', 'admin', 'incharge', 'teacher', 'student'), async (req: AuthRequest, res: Response) => {
   try {
+    if (req.user!.role === 'student') {
+      const own = await query('SELECT id FROM students WHERE user_id=$1', [req.user!.id]);
+      if (own.rows.length === 0 || Number(own.rows[0].id) !== Number(req.params.id)) {
+        res.status(403).json({ success: false, message: 'Access denied' });
+        return;
+      }
+    }
     const result = await query(
       `SELECT s.*,
               c.course_name, c.fee_amount AS course_fee_amount, c.is_free AS course_is_free,
@@ -325,32 +332,48 @@ router.post('/', authorize('super_admin', 'admin'), uploadPhoto.single('photo'),
       return;
     }
 
-    const emailNorm = String(email).trim().toLowerCase();
+    const emailNorm = email && String(email).trim() !== ''
+      ? String(email).trim().toLowerCase()
+      : null;
 
-    // ── 2. Duplicate email check (students + users) ──
-    const dupStudent = await query('SELECT id FROM students WHERE LOWER(email)=$1', [emailNorm]);
-    if (dupStudent.rows.length > 0) {
-      res.status(409).json({
-        success: false,
-        error: 'DUPLICATE_EMAIL',
-        message: 'A student with this email already exists. Please use a different email address.',
-      });
-      return;
-    }
-    const dupUser = await query('SELECT id FROM users WHERE LOWER(email)=$1', [emailNorm]);
-    if (dupUser.rows.length > 0) {
-      res.status(409).json({
-        success: false,
-        error: 'DUPLICATE_EMAIL',
-        message: 'This email is already registered as a system user. Please use a different email address.',
-      });
-      return;
+    // ── 2. Duplicate email check (students + users) — only when email provided ──
+    if (emailNorm) {
+      const dupStudent = await query('SELECT id FROM students WHERE LOWER(email)=$1', [emailNorm]);
+      if (dupStudent.rows.length > 0) {
+        res.status(409).json({
+          success: false,
+          error: 'DUPLICATE_EMAIL',
+          message: 'A student with this email already exists. Please use a different email address.',
+        });
+        return;
+      }
+      const dupUser = await query('SELECT id FROM users WHERE LOWER(email)=$1', [emailNorm]);
+      if (dupUser.rows.length > 0) {
+        res.status(409).json({
+          success: false,
+          error: 'DUPLICATE_EMAIL',
+          message: 'This email is already registered as a system user. Please use a different email address.',
+        });
+        return;
+      }
     }
 
     // ── 3. Begin transaction ──
     await client.query('BEGIN');
 
-    const student_id = await generateStudentId();
+    if (course_id && batch_id) {
+      const batchCheck = await client.query(
+        'SELECT 1 FROM batches WHERE id=$1 AND course_id=$2',
+        [batch_id, course_id]
+      );
+      if (batchCheck.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(400).json({ success: false, message: 'Selected batch does not belong to the selected course' });
+        return;
+      }
+    }
+
+    const student_id = await generateStudentId(client);
     const photo_url  = req.file ? `/uploads/photos/${req.file.filename}` : null;
 
     const cert10  = cert_10th_collected  === 'true' || cert_10th_collected  === true;
@@ -527,6 +550,7 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
       full_name, mobile, email, date_of_birth, gender, address,
       parent_name, parent_mobile, guardian_type, parent_present, status,
       cert_10th_collected, cert_12th_collected, cert_diploma_collected,
+      course_id, batch_id, admission_date,
     } = req.body;
 
     const validErr = validateStudentInput(req.body);
@@ -537,10 +561,14 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
       res.status(404).json({ success: false, message: 'Student not found' });
       return;
     }
-    const emailNorm = String(email).trim().toLowerCase();
+    const emailNorm = email && String(email).trim() !== ''
+      ? String(email).trim().toLowerCase()
+      : null;
 
-    // Check duplicate email (excluding self) in students
-    const dupStudent = await query('SELECT id FROM students WHERE LOWER(email)=$1 AND id!=$2', [emailNorm, req.params.id]);
+    // Check duplicate email (excluding self) in students — only when email provided
+    const dupStudent = emailNorm
+      ? await query('SELECT id FROM students WHERE LOWER(email)=$1 AND id!=$2', [emailNorm, req.params.id])
+      : { rows: [] };
     if (dupStudent.rows.length > 0) {
       res.status(409).json({
         success: false,
@@ -548,6 +576,17 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
         message: 'This email is already used by another student.',
       });
       return;
+    }
+
+    if (course_id && batch_id) {
+      const batchCheck = await query(
+        'SELECT 1 FROM batches WHERE id=$1 AND course_id=$2',
+        [batch_id, course_id]
+      );
+      if (batchCheck.rows.length === 0) {
+        res.status(400).json({ success: false, message: 'Selected batch does not belong to the selected course' });
+        return;
+      }
     }
 
     const photo_url = req.file
@@ -569,8 +608,9 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
            address=$6, parent_name=$7, parent_mobile=$8, guardian_type=$9,
            parent_present=$10, photo_url=$11, status=$12,
            cert_10th_collected=$13, cert_12th_collected=$14, cert_diploma_collected=$15,
-           uniform_received=$16, consent_given=$17, accommodation_type=$18
-       WHERE id=$19 RETURNING *`,
+           uniform_received=$16, consent_given=$17, accommodation_type=$18,
+           course_id=$19, batch_id=$20, admission_date=COALESCE($21::date, admission_date)
+       WHERE id=$22 RETURNING *`,
       [
         String(full_name).trim(), String(mobile).trim(), emailNorm,
         date_of_birth || null, gender || null,
@@ -583,9 +623,64 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
         uniformReceived,
         consentGiven,
         newAccommodationType,
+        course_id || null,
+        batch_id || null,
+        admission_date || null,
         req.params.id,
       ]
     );
+
+    // Keep the student's formal enrollment synchronized with the selected
+    // course/batch. This makes Candidate Edit -> Candidates and Enrollment
+    // show the same course/batch data. If the student has no enrollment yet,
+    // create one automatically.
+    if (course_id) {
+      const courseResult = await query(
+        'SELECT fee_amount FROM courses WHERE id=$1', [course_id]
+      );
+      const courseFee = courseResult.rows.length > 0
+        ? Number(courseResult.rows[0].fee_amount || 0)
+        : 0;
+
+      const targetEnrollment = await query(
+        'SELECT id FROM enrollments WHERE student_id=$1 AND course_id=$2 LIMIT 1',
+        [req.params.id, course_id]
+      );
+
+      if (targetEnrollment.rows.length > 0) {
+        await query(
+          `UPDATE enrollments
+           SET batch_id=$1, status='approved', approved_by=$2, approved_at=COALESCE(approved_at, NOW()),
+               updated_at=NOW()
+           WHERE id=$3`,
+          [batch_id || null, req.user!.id, targetEnrollment.rows[0].id]
+        );
+      } else {
+        // If this student already has a primary enrollment, update it to the
+        // newly selected course instead of creating duplicate enrollments.
+        const existingEnrollment = await query(
+          'SELECT id FROM enrollments WHERE student_id=$1 ORDER BY created_at DESC LIMIT 1',
+          [req.params.id]
+        );
+
+        if (existingEnrollment.rows.length > 0) {
+          await query(
+            `UPDATE enrollments
+             SET course_id=$1, batch_id=$2, course_fee=$3, status='approved',
+                 approved_by=$4, approved_at=COALESCE(approved_at, NOW()), updated_at=NOW()
+             WHERE id=$5`,
+            [course_id, batch_id || null, courseFee, req.user!.id, existingEnrollment.rows[0].id]
+          );
+        } else {
+          await query(
+            `INSERT INTO enrollments
+               (student_id, course_id, batch_id, course_fee, status, approved_by, approved_at)
+             VALUES ($1,$2,$3,$4,'approved',$5,NOW())`,
+            [req.params.id, course_id, batch_id || null, courseFee, req.user!.id]
+          );
+        }
+      }
+    }
 
     // Auto-manage hostel_record based on accommodation change
     if (newAccommodationType === 'hostel') {

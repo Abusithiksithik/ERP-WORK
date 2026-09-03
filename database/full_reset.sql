@@ -16,6 +16,9 @@ BEGIN;
 -- STEP 1: Delete child/dependent tables first (FK order)
 -- ----------------------------------------------------------------
 
+-- New Admissions references students with ON DELETE RESTRICT, so remove entries first.
+DELETE FROM new_admissions;
+
 -- Video watch progress (depends on students + lms_videos)
 DELETE FROM video_progress;
 
@@ -74,6 +77,7 @@ DELETE FROM course_categories;
 -- STEP 5: Reset all sequences to 1 for clean IDs
 -- ----------------------------------------------------------------
 
+ALTER SEQUENCE new_admissions_id_seq    RESTART WITH 1;
 ALTER SEQUENCE video_progress_id_seq     RESTART WITH 1;
 ALTER SEQUENCE attendance_id_seq         RESTART WITH 1;
 ALTER SEQUENCE payments_id_seq           RESTART WITH 1;

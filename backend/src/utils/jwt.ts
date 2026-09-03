@@ -2,7 +2,12 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const JWT_SECRET = process.env.JWT_SECRET || 'epft_secret_key';
+const isProduction = process.env.NODE_ENV === 'production';
+const configuredSecret = process.env.JWT_SECRET?.trim();
+if (isProduction && (!configuredSecret || configuredSecret.length < 32)) {
+  throw new Error('JWT_SECRET must be set to a strong 32+ character value in production');
+}
+const JWT_SECRET = configuredSecret || 'epft_dev_only_secret_change_me';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
 export interface JwtPayload {

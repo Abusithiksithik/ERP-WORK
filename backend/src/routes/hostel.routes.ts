@@ -42,9 +42,11 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         COALESCE(hr.hostel_fee, 0)::numeric                               AS hostel_fee,
         COALESCE(hr.mess_fee,   0)::numeric                               AS mess_fee,
         (COALESCE(hr.hostel_fee, 0) + COALESCE(hr.mess_fee, 0))::numeric  AS total_fee,
+        COALESCE(hr.discount,   0)::numeric                               AS discount,
         COALESCE(hr.paid_amount, 0)::numeric                              AS paid_amount,
-        (COALESCE(hr.hostel_fee, 0) + COALESCE(hr.mess_fee, 0)
-          - COALESCE(hr.paid_amount, 0))::numeric                         AS pending_balance,
+        GREATEST(COALESCE(hr.hostel_fee, 0) + COALESCE(hr.mess_fee, 0)
+          - COALESCE(hr.discount, 0)
+          - COALESCE(hr.paid_amount, 0), 0)::numeric                      AS pending_balance,
         hr.notes,
         hr.created_at,
         hr.updated_at
@@ -190,8 +192,9 @@ router.post('/:id/payments', authorize('super_admin', 'admin'), async (req: Auth
          COALESCE(hr.hostel_fee,  0)::numeric AS hostel_fee,
          COALESCE(hr.mess_fee,    0)::numeric AS mess_fee,
          (COALESCE(hr.hostel_fee,0)+COALESCE(hr.mess_fee,0))::numeric AS total_fee,
+         COALESCE(hr.discount, 0)::numeric AS discount,
          COALESCE(hr.paid_amount, 0)::numeric AS paid_amount,
-         (COALESCE(hr.hostel_fee,0)+COALESCE(hr.mess_fee,0)-COALESCE(hr.paid_amount,0))::numeric AS pending_balance
+         GREATEST(COALESCE(hr.hostel_fee,0)+COALESCE(hr.mess_fee,0)-COALESCE(hr.discount,0)-COALESCE(hr.paid_amount,0),0)::numeric AS pending_balance
        FROM hostel_records hr WHERE hr.id = $1`,
       [id]
     );
@@ -228,9 +231,11 @@ router.get('/:id', authorize('super_admin', 'admin', 'incharge'), async (req: Au
          COALESCE(hr.hostel_fee,  0)::numeric                             AS hostel_fee,
          COALESCE(hr.mess_fee,    0)::numeric                             AS mess_fee,
          (COALESCE(hr.hostel_fee,0)+COALESCE(hr.mess_fee,0))::numeric     AS total_fee,
+         COALESCE(hr.discount,    0)::numeric                             AS discount,
          COALESCE(hr.paid_amount, 0)::numeric                             AS paid_amount,
-         (COALESCE(hr.hostel_fee,0)+COALESCE(hr.mess_fee,0)
-           -COALESCE(hr.paid_amount,0))::numeric                          AS pending_balance,
+         GREATEST(COALESCE(hr.hostel_fee,0)+COALESCE(hr.mess_fee,0)
+           -COALESCE(hr.discount,0)
+           -COALESCE(hr.paid_amount,0),0)::numeric                        AS pending_balance,
          hr.notes,
          hr.updated_at
        FROM hostel_records hr
@@ -249,6 +254,45 @@ router.get('/:id', authorize('super_admin', 'admin', 'incharge'), async (req: Au
     res.json({ success: true, data: result.rows[0] });
   } catch (err) {
     console.error('GET /hostel/:id error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/hostel/:id/discount — apply a per-student discount
+router.post('/:id/discount', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ success: false, message: 'Invalid hostel record ID' });
+      return;
+    }
+    const { discount } = req.body;
+    const discountAmt = parseFloat(discount);
+    if (isNaN(discountAmt) || discountAmt < 0) {
+      res.status(400).json({ success: false, message: 'Discount must be 0 or more' });
+      return;
+    }
+    const result = await query(
+      `UPDATE hostel_records
+       SET discount = $1
+       WHERE id = $2
+       RETURNING
+         id AS hostel_record_id,
+         hostel_fee::numeric,
+         mess_fee::numeric,
+         (hostel_fee + mess_fee)::numeric AS total_fee,
+         discount::numeric,
+         paid_amount::numeric,
+         GREATEST((hostel_fee + mess_fee) - COALESCE(discount,0) - COALESCE(paid_amount,0), 0)::numeric AS pending_balance`,
+      [discountAmt, id]
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Hostel record not found' });
+      return;
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('POST /hostel/:id/discount error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

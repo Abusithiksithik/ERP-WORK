@@ -14,7 +14,6 @@ import VideoEdit from './pages/lms/VideoEdit';
 import MaterialList from './pages/materials/MaterialList';
 import MaterialAdd from './pages/materials/MaterialAdd';
 import PaymentMethodList from './pages/payments/PaymentMethodList';
-import PaymentList from './pages/payments/PaymentList';
 import EnrollmentList from './pages/enrollment/EnrollmentList';
 import AttendancePage from './pages/attendance/AttendancePage';
 import ProfilePage from './pages/profile/ProfilePage';
@@ -24,6 +23,9 @@ import CourseAdd from './pages/courses/CourseAdd';
 import CourseEdit from './pages/courses/CourseEdit';
 import BatchList from './pages/batches/BatchList';
 import HostelList from './pages/hostel/HostelList';
+import ExamFeeList from './pages/examFees/ExamFeeList';
+import NewAdmissionList from './pages/newAdmission/NewAdmissionList';
+import NewAdmissionAdd from './pages/newAdmission/NewAdmissionAdd';
 
 const ADMIN_ROLES   = ['super_admin', 'admin'];
 const ADMIN_INCHARGE = ['super_admin', 'admin', 'incharge'];
@@ -81,10 +83,9 @@ function App() {
             <Route path="/materials/add" element={<MaterialAdd />} />
           </Route>
 
-          {/* Payment Methods — Admin only */}
+          {/* Payment Methods — Admin only (Settings section) */}
           <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
             <Route path="/payment-methods" element={<PaymentMethodList />} />
-            <Route path="/payments" element={<PaymentList />} />
           </Route>
 
           {/* Courses — Admin only (Settings section) */}
@@ -102,6 +103,17 @@ function App() {
           {/* Hostel — Admin only */}
           <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
             <Route path="/hostel" element={<HostelList />} />
+          </Route>
+
+          {/* Exam Fees — Admin, Incharge */}
+          <Route element={<PrivateRoute allowedRoles={ADMIN_INCHARGE} />}>
+            <Route path="/exam-fees" element={<ExamFeeList />} />
+          </Route>
+
+          {/* New Admissions — Admin, Incharge */}
+          <Route element={<PrivateRoute allowedRoles={ADMIN_INCHARGE} />}>
+            <Route path="/new-admissions" element={<NewAdmissionList />} />
+            <Route path="/new-admissions/add" element={<NewAdmissionAdd />} />
           </Route>
 
           {/* Users — Admin only */}

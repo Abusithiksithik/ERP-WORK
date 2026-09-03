@@ -43,7 +43,7 @@ const DiscontinuedStudents: React.FC = () => {
       setStudents(res.data.data ?? []);
       setTotal(res.data.total ?? 0);
     } catch {
-      toast.error('Failed to load discontinued students');
+      toast.error('Failed to load discontinued candidates');
     } finally {
       setLoading(false);
     }
@@ -142,7 +142,7 @@ const DiscontinuedStudents: React.FC = () => {
     setRestoreLoading(true);
     try {
       await api.post(`/students/${restoreStudent.id}/restore`);
-      toast.success(`${restoreStudent.full_name} restored to active students!`);
+      toast.success(`${restoreStudent.full_name} restored to active candidates!`);
       // Optimistically remove from discontinued list immediately
       setStudents(prev => prev.filter(s => s.id !== restoreStudent.id));
       setTotal(prev => Math.max(0, prev - 1));
@@ -189,10 +189,10 @@ const DiscontinuedStudents: React.FC = () => {
     <div>
       <div className="page-header">
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <Link to="/students" className="btn btn-secondary btn-sm" title="Back to Students"><FiArrowLeft /></Link>
+          <Link to="/students" className="btn btn-secondary btn-sm" title="Back to Candidates"><FiArrowLeft /></Link>
           <div>
-            <h1 className="page-title" style={{ color: 'var(--danger, #ef4444)' }}>🚫 Discontinued Students</h1>
-            <p className="page-subtitle">{total} discontinued students</p>
+            <h1 className="page-title" style={{ color: 'var(--danger, #ef4444)' }}>🚫 Discontinued Candidates</h1>
+            <p className="page-subtitle">{total} discontinued candidates</p>
           </div>
         </div>
       </div>
@@ -215,7 +215,7 @@ const DiscontinuedStudents: React.FC = () => {
         ) : students.length === 0 ? (
           <div className="empty-state">
             <div className="empty-state-icon">✅</div>
-            <h3>No Discontinued Students</h3>
+            <h3>No Discontinued Candidates</h3>
             <p>All students are currently active.</p>
           </div>
         ) : (
@@ -223,7 +223,7 @@ const DiscontinuedStudents: React.FC = () => {
             <table>
               <thead>
                 <tr>
-                  <th>Student</th>
+                  <th>Candidate</th>
                   <th>ID</th>
                   <th>Mobile</th>
                   <th>Course</th>
@@ -270,7 +270,7 @@ const DiscontinuedStudents: React.FC = () => {
                         </button>
                         <button
                           className="action-btn view"
-                          title="Restore Student"
+                          title="Restore Candidate"
                           onClick={() => openRestore(s)}
                           style={{ background: 'rgba(16,185,129,0.15)', color: 'var(--teal)' }}
                         >
@@ -278,7 +278,7 @@ const DiscontinuedStudents: React.FC = () => {
                         </button>
                         <button
                           className="action-btn delete"
-                          title="Permanently Delete Student"
+                          title="Permanently Delete Candidate"
                           onClick={() => openDelete(s)}
                           style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}
                         >
@@ -311,7 +311,7 @@ const DiscontinuedStudents: React.FC = () => {
         <div className="modal-overlay">
           <div className="modal" style={{ maxWidth: 700 }}>
             <div className="modal-header">
-              <h2 className="modal-title">✏️ Edit Discontinued Student</h2>
+              <h2 className="modal-title">✏️ Edit Discontinued Candidate</h2>
               <button className="modal-close" onClick={() => setShowEditModal(false)}><FiX /></button>
             </div>
             <form onSubmit={handleEditSubmit} style={{ maxHeight: '70vh', overflowY: 'auto', paddingRight: 4 }}>
@@ -378,7 +378,7 @@ const DiscontinuedStudents: React.FC = () => {
               <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(16,185,129,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 28 }}>
                 🔄
               </div>
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Restore Student</h2>
+              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Restore Candidate</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
                 Are you sure you want to restore <strong>{restoreStudent.full_name}</strong> back to active students?
               </p>
@@ -410,7 +410,7 @@ const DiscontinuedStudents: React.FC = () => {
               <div style={{ width: 68, height: 68, borderRadius: '50%', background: 'rgba(239,68,68,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 30 }}>
                 🗑️
               </div>
-              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8, color: '#ef4444' }}>Permanently Delete Student</h2>
+              <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8, color: '#ef4444' }}>Permanently Delete Candidate</h2>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6 }}>
                 This action is <strong style={{ color: '#ef4444' }}>irreversible</strong>. All data for this student — including attendance, payments, and enrollments — will be permanently removed from the system.
               </p>

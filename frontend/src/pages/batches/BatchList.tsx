@@ -124,7 +124,7 @@ const BatchList: React.FC = () => {
                     <th>Master Course</th>
                     <th>Start Date</th>
                     <th>End Date</th>
-                    <th>Students</th>
+                    <th>Candidates</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
