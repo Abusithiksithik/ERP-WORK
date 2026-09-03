@@ -92,13 +92,19 @@ const Dashboard: React.FC = () => {
   ] : [];
 
   // Bar chart for course-wise financials
-  const barData = courseFinance.map(cf => ({
-    name: cf.course_name.length > 12 ? cf.course_name.slice(0, 12) + '…' : cf.course_name,
-    fullLabel: cf.label,
-    Collected: Number(cf.paid_amount),
-    Pending: Number(cf.pending_amount),
-    Candidates: Number(cf.candidate_count),
-  }));
+const barData = courseFinance.map(cf => {
+  const courseName = cf.course_name ?? cf.label ?? 'Unknown Course';
+
+  return {
+    name: courseName.length > 12
+      ? courseName.slice(0, 12) + '…'
+      : courseName,
+    fullLabel: cf.label ?? courseName,
+    Collected: Number(cf.paid_amount ?? 0),
+    Pending: Number(cf.pending_amount ?? 0),
+    Candidates: Number(cf.candidate_count ?? 0),
+  };
+});
 
   const totalCollected = courseFinance.reduce((s, c) => s + Number(c.paid_amount), 0);
   const totalPending   = courseFinance.reduce((s, c) => s + Number(c.pending_amount), 0);
