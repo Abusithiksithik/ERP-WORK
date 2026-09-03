@@ -553,6 +553,84 @@ const StudentView: React.FC = () => {
         </div>
       </div>
 
+<<<<<<< HEAD
+=======
+      {/* ── Record Payment Modal ── */}
+      {showPayModal && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <h2 className="modal-title">💰 Record Payment</h2>
+              <button className="modal-close" onClick={() => setShowPayModal(false)}><FiX /></button>
+            </div>
+            <div style={{ background: 'var(--bg-tertiary)', borderRadius: 10, padding: '12px 16px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Candidate</span>
+                <span style={{ fontWeight: 600 }}>{student.full_name}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Course Fee</span>
+                <span style={{ fontWeight: 600 }}>{fmt(courseFee)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Total Paid</span>
+                <span style={{ fontWeight: 600, color: 'var(--teal)' }}>{fmt(totalPaid)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Balance Due</span>
+                <span style={{ fontWeight: 700, color: 'var(--red)' }}>{fmt(balance)}</span>
+              </div>
+            </div>
+            <form onSubmit={handlePaySubmit}>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Amount ₹ *</label>
+                  <input
+                    type="number" className="form-control"
+                    value={payForm.amount}
+                    onChange={e => setPayForm(p => ({ ...p, amount: e.target.value }))}
+                    placeholder={`Max: ₹${balance.toLocaleString('en-IN')}`}
+                    min={1} max={balance} required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Date *</label>
+                  <input type="date" className="form-control"
+                    value={payForm.payment_date}
+                    onChange={e => setPayForm(p => ({ ...p, payment_date: e.target.value }))}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Payment Method</label>
+                <select className="form-control"
+                  value={payForm.payment_method}
+                  onChange={e => setPayForm(p => ({ ...p, payment_method: e.target.value }))}>
+                  <option value="cash">Cash</option>
+                  <option value="upi">GPay / UPI</option>
+                  <option value="bank">Bank Transfer</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Notes</label>
+                <input type="text" className="form-control"
+                  value={payForm.notes}
+                  onChange={e => setPayForm(p => ({ ...p, notes: e.target.value }))}
+                  placeholder="Optional notes" />
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button type="submit" className="btn btn-primary" disabled={payLoading} style={{ flex: 1 }}>
+                  {payLoading ? '⏳ Recording...' : '✓ Record Payment'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowPayModal(false)}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
       {/* ── Add Material Modal ── */}
       {showMaterialModal && (
         <div className="modal-overlay">

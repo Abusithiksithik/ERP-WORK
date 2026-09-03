@@ -381,11 +381,14 @@ const HostelList: React.FC = () => {
         <div>
           <h1 className="page-title">🏠 Hostel Management</h1>
           <p className="page-subtitle">Candidates staying in hostel — fee tracking &amp; payments</p>
+<<<<<<< HEAD
         </div>
         <div>
           <button className="btn btn-primary" onClick={() => { setBulkHostelFee(''); setBulkMessFee(''); setBulkModal(true); }}>
             <FiLayers /> Set Hostel &amp; Mess Fee
           </button>
+=======
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
         </div>
       </div>
 

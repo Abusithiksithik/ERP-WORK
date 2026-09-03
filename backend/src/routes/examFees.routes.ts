@@ -208,11 +208,17 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         COALESCE(efr.other_fee, 0)::numeric                                 AS other_fee,
         COALESCE(efr.other_fee_note, '')                                    AS other_fee_note,
         (COALESCE(efr.exam_fee, 0) + COALESCE(efr.other_fee, 0))::numeric  AS total_fee,
+<<<<<<< HEAD
         COALESCE(efr.discount, 0)::numeric                                  AS discount,
         COALESCE(efr.paid_amount, 0)::numeric                               AS paid_amount,
         GREATEST(
           (COALESCE(efr.exam_fee, 0) + COALESCE(efr.other_fee, 0))
           - COALESCE(efr.discount, 0)
+=======
+        COALESCE(efr.paid_amount, 0)::numeric                               AS paid_amount,
+        GREATEST(
+          (COALESCE(efr.exam_fee, 0) + COALESCE(efr.other_fee, 0))
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
           - COALESCE(efr.paid_amount, 0), 0
         )::numeric                                                           AS pending_balance,
         efr.notes,
@@ -403,8 +409,12 @@ router.post('/:id/payments', authorize('super_admin', 'admin', 'incharge'), asyn
          s.full_name, s.student_id AS student_code,
          c.course_name, b.batch_name,
          (COALESCE(efr.exam_fee,0) + COALESCE(efr.other_fee,0)) AS total_fee,
+<<<<<<< HEAD
          COALESCE(efr.discount,0) AS discount,
          GREATEST((COALESCE(efr.exam_fee,0)+COALESCE(efr.other_fee,0))-COALESCE(efr.discount,0)-COALESCE(efr.paid_amount,0),0) AS pending_balance
+=======
+         GREATEST((COALESCE(efr.exam_fee,0)+COALESCE(efr.other_fee,0))-COALESCE(efr.paid_amount,0),0) AS pending_balance
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
        FROM exam_fee_records efr
        JOIN students s ON s.id = efr.student_id
        LEFT JOIN courses c ON c.id = s.course_id
@@ -422,6 +432,7 @@ router.post('/:id/payments', authorize('super_admin', 'admin', 'incharge'), asyn
   }
 });
 
+<<<<<<< HEAD
 // ─── POST /api/exam-fees/:id/discount — apply a per-student discount ───
 router.post('/:id/discount', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
@@ -462,6 +473,8 @@ router.post('/:id/discount', authorize('super_admin', 'admin'), async (req: Auth
   }
 });
 
+=======
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
 // ─── DELETE /api/exam-fees/payments/:paymentId ───
 router.delete('/payments/:paymentId', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();

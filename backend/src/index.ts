@@ -29,8 +29,6 @@ import dashboardRoutes        from './routes/dashboard.routes';
 import profileRoutes          from './routes/profile.routes';
 import studentMaterialsRoutes from './routes/student_materials.routes';
 import hostelRoutes           from './routes/hostel.routes';
-import examFeesRoutes        from './routes/examFees.routes';
-import newAdmissionsRoutes   from './routes/newAdmissions.routes';
 
 const app  = express();
 const PORT = process.env.PORT || 5007;
@@ -88,8 +86,6 @@ app.use('/api/dashboard',         dashboardRoutes);
 app.use('/api/profile',           profileRoutes);
 app.use('/api/student-materials', studentMaterialsRoutes);
 app.use('/api/hostel',            hostelRoutes);
-app.use('/api/exam-fees',         examFeesRoutes);
-app.use('/api/new-admissions',    newAdmissionsRoutes);
 
 // Health check
 app.get('/api/health', async (_req, res) => {
@@ -247,14 +243,6 @@ const initDb = async () => {
     { name: 'migrate_v3', file: 'migrate_v3.sql' },
     { name: 'migrate_v4', file: 'migrate_v4.sql' },
     { name: 'migrate_v5', file: 'migrate_v5.sql' },
-    { name: 'migrate_v6', file: 'migrate_v6.sql' },
-    { name: 'migrate_v7', file: 'migrate_v7.sql' },
-    { name: 'migrate_v8', file: 'migrate_v8.sql' },
-    { name: 'migrate_v9', file: 'migrate_v9.sql' },
-    { name: 'migrate_v10', file: 'migrate_v10.sql' },
-    { name: 'migrate_v11', file: 'migrate_v11.sql' },
-    { name: 'migrate_v12', file: 'migrate_v12.sql' },
-    { name: 'migrate_v13', file: 'migrate_v13.sql' },
   ];
 
   for (const m of migrations) {

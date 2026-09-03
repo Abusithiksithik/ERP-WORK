@@ -340,6 +340,15 @@ const StudentAdd: React.FC = () => {
               </div>
               {form.admission_date && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>{fmtDate(form.admission_date)}</div>}
             </div>
+<<<<<<< HEAD
+=======
+            <div className="form-group">
+              <label className="form-label">Status</label>
+              <select className="form-control" value={form.status} onChange={set('status')}>
+                <option value="active">Active</option>
+              </select>
+            </div>
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
           </div>
           <div className="form-group">
             <label className="form-label">Address</label>

@@ -24,7 +24,10 @@ interface ExamFeeRecord {
   other_fee: number;
   other_fee_note?: string;
   total_fee: number;
+<<<<<<< HEAD
   discount?: number;
+=======
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
   paid_amount: number;
   pending_balance: number;
   notes?: string;
@@ -99,6 +102,7 @@ const ExamFeeList: React.FC = () => {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [historyRecord, setHistoryRecord] = useState<ExamFeeRecord | null>(null);
   const [paymentHistory, setPaymentHistory] = useState<Payment[]>([]);
+<<<<<<< HEAD
 
   // Payment action dropdown (Record Payment / Discount / Cancel)
   const [payDropdownId, setPayDropdownId] = useState<number | null>(null);
@@ -108,6 +112,8 @@ const ExamFeeList: React.FC = () => {
   const [discountRecord, setDiscountRecord] = useState<ExamFeeRecord | null>(null);
   const [discountAmount, setDiscountAmount] = useState('');
   const [discountLoading, setDiscountLoading] = useState(false);
+=======
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // Load categories and courses
@@ -147,6 +153,7 @@ const ExamFeeList: React.FC = () => {
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
 
+<<<<<<< HEAD
   // Close pay dropdown when clicking outside
   useEffect(() => {
     if (payDropdownId === null) return;
@@ -155,6 +162,8 @@ const ExamFeeList: React.FC = () => {
     return () => document.removeEventListener('click', handler);
   }, [payDropdownId]);
 
+=======
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
   // ── Fee Settings modal (common fee for a course) ──
   const openSettingsModal = async () => {
     setSettingForm({ category_id: '', course_id: '', exam_fee: '', other_fee: '', other_fee_note: '', notes: '' });
@@ -275,6 +284,7 @@ const ExamFeeList: React.FC = () => {
     }
   };
 
+<<<<<<< HEAD
   // ── Discount ──
   const openDiscountModal = (rec: ExamFeeRecord) => {
     setDiscountRecord(rec);
@@ -301,6 +311,8 @@ const ExamFeeList: React.FC = () => {
     }
   };
 
+=======
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
   // ── Payment history ──
   const openHistoryModal = async (rec: ExamFeeRecord) => {
     setHistoryRecord(rec);
@@ -486,6 +498,7 @@ const ExamFeeList: React.FC = () => {
                               <FiEdit2 size={13} />
                             </button>
                           )}
+<<<<<<< HEAD
                           {/* Payment dropdown */}
                           <div style={{ position: 'relative' }}>
                             <button
@@ -523,6 +536,11 @@ const ExamFeeList: React.FC = () => {
                               </div>
                             )}
                           </div>
+=======
+                          <button className="btn btn-sm btn-primary" title="Add payment" onClick={() => openPayModal(rec)}>
+                            <FiDollarSign size={13} />
+                          </button>
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
                           <button className="btn btn-sm btn-secondary" title="Payment history" onClick={() => openHistoryModal(rec)}>
                             <FiClock size={13} />
                           </button>
@@ -796,6 +814,7 @@ const ExamFeeList: React.FC = () => {
         </div>
       )}
 
+<<<<<<< HEAD
       {/* ── DISCOUNT MODAL ── */}
       {showDiscountModal && discountRecord && (
         <div className="modal-overlay" onClick={() => setShowDiscountModal(false)}>
@@ -862,6 +881,8 @@ const ExamFeeList: React.FC = () => {
         </div>
       )}
 
+=======
+>>>>>>> db4c08a89fc3294053c71826514ea5eec542b960
       {/* ── PAYMENT HISTORY MODAL ── */}
       {showHistoryModal && historyRecord && (
         <div className="modal-overlay" onClick={() => setShowHistoryModal(false)}>
