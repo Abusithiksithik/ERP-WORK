@@ -101,10 +101,10 @@ router.get('/charts/course-finance', async (_req: AuthRequest, res: Response) =>
         c.course_name,
         COALESCE(cc.category_name, '') || ' → ' || c.course_name AS label,
         COUNT(DISTINCT efr.student_id)                              AS candidate_count,
-        COALESCE(SUM(efr.exam_fee + efr.other_fee), 0)::numeric    AS total_fee,
+        COALESCE(SUM(efr.exam_fee), 0)::numeric    AS total_fee,
         COALESCE(SUM(efr.paid_amount), 0)::numeric                  AS paid_amount,
         GREATEST(
-          COALESCE(SUM(efr.exam_fee + efr.other_fee), 0)
+          COALESCE(SUM(efr.exam_fee), 0)
           - COALESCE(SUM(efr.paid_amount), 0),
           0
         )::numeric                                                   AS pending_amount
@@ -129,10 +129,10 @@ router.get('/charts/exam-fee-summary', async (_req: AuthRequest, res: Response) 
   try {
     const result = await query(`
       SELECT
-        COALESCE(SUM(efr.exam_fee + efr.other_fee), 0)::numeric AS total_fee,
+        COALESCE(SUM(efr.exam_fee), 0)::numeric AS total_fee,
         COALESCE(SUM(efr.paid_amount), 0)::numeric               AS paid_amount,
         GREATEST(
-          COALESCE(SUM(efr.exam_fee + efr.other_fee), 0)
+          COALESCE(SUM(efr.exam_fee), 0)
           - COALESCE(SUM(efr.paid_amount), 0),
           0
         )::numeric                                                AS pending_amount

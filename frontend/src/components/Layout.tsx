@@ -53,7 +53,7 @@ const Layout: React.FC = () => {
       show: isAdmin || isIncharge,
     },
     {
-      to: '/students', icon: <FiUsers />, label: 'Candidates',
+      to: '/students', icon: <FiUsers />, label: 'Course',
       show: isAdmin || isIncharge || isTeacher,
     },
     {

@@ -162,12 +162,12 @@ const StudentList: React.FC = () => {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Candidates</h1>
+          <h1 className="page-title">Course</h1>
           <p className="page-subtitle">{total} total candidates</p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {isAdmin && <button className="btn btn-secondary" onClick={handleExport}><FiDownload /> Export CSV</button>}
-          {isAdmin && <Link to="/students/add" className="btn btn-primary"><FiPlus /> Add Candidate</Link>}
+          {isAdmin && <Link to="/students/add" className="btn btn-primary"><FiPlus /> Add Course</Link>}
         </div>
       </div>
 

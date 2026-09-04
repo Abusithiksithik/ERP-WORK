@@ -62,7 +62,8 @@ body {
 /* ── Sidebar ── */
 .sidebar {
   width: var(--sidebar-w);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
   background: linear-gradient(180deg, #1a1040 0%, #0f172a 40%, #0a1628 100%);
   border-right: 1px solid var(--border);
   display: flex;
@@ -103,7 +104,7 @@ body {
 }
 .sidebar-toggle:hover { color: var(--accent); }
 
-.sidebar-nav { flex: 1; padding: 12px 8px; overflow-y: auto; overflow-x: hidden; }
+.sidebar-nav { flex: 1; min-height: 0; padding: 12px 8px 20px; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 .nav-item {
   display: flex; align-items: center; gap: 12px;
   padding: 11px 12px;
