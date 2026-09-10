@@ -64,9 +64,9 @@ const NewAdmissionList: React.FC = () => {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>New Admissions</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Candidates</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: '4px 0 0' }}>
-            {rows.length} entr{rows.length === 1 ? 'y' : 'ies'}
+            {rows.length} candidate{rows.length === 1 ? '' : 's'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>

@@ -274,7 +274,7 @@ router.post('/:id/discount', authorize('super_admin', 'admin'), async (req: Auth
     }
     const result = await query(
       `UPDATE hostel_records
-       SET discount = $1
+       SET discount = LEAST($1, COALESCE(hostel_fee,0) + COALESCE(mess_fee,0))
        WHERE id = $2
        RETURNING
          id AS hostel_record_id,
@@ -282,6 +282,7 @@ router.post('/:id/discount', authorize('super_admin', 'admin'), async (req: Auth
          mess_fee::numeric,
          (hostel_fee + mess_fee)::numeric AS total_fee,
          discount::numeric,
+         GREATEST((hostel_fee + mess_fee) - COALESCE(discount,0), 0)::numeric AS final_fee,
          paid_amount::numeric,
          GREATEST((hostel_fee + mess_fee) - COALESCE(discount,0) - COALESCE(paid_amount,0), 0)::numeric AS pending_balance`,
       [discountAmt, id]
@@ -324,15 +325,18 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
       `UPDATE hostel_records
        SET hostel_fee = $1,
            mess_fee   = $2,
+           discount   = LEAST(COALESCE(discount,0), $1 + $2),
            notes      = $3
        WHERE id = $4
        RETURNING
          id AS hostel_record_id,
          hostel_fee::numeric,
          mess_fee::numeric,
-         (hostel_fee + mess_fee)::numeric              AS total_fee,
+         (hostel_fee + mess_fee)::numeric AS total_fee,
+         discount::numeric,
+         GREATEST((hostel_fee + mess_fee) - COALESCE(discount,0), 0)::numeric AS final_fee,
          paid_amount::numeric,
-         (hostel_fee + mess_fee - paid_amount)::numeric AS pending_balance,
+         GREATEST((hostel_fee + mess_fee) - COALESCE(discount,0) - COALESCE(paid_amount,0), 0)::numeric AS pending_balance,
          notes,
          updated_at`,
       [hf, mf, notes || null, id]

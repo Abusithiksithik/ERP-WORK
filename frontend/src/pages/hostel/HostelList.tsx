@@ -92,9 +92,6 @@ const HostelList: React.FC = () => {
   });
   const [savingPay, setSavingPay]     = useState(false);
 
-  // ── Payment action dropdown ──────────────────────────────────────────────
-  const [payDropdownId, setPayDropdownId] = useState<number | null>(null);
-
   // ── Discount modal ──────────────────────────────────────────────────────
   const [discountModal, setDiscountModal]     = useState(false);
   const [discountTarget, setDiscountTarget]   = useState<HostelStudent | null>(null);
@@ -135,19 +132,12 @@ const HostelList: React.FC = () => {
 
 
 
-  // Close pay dropdown when clicking outside
-  useEffect(() => {
-    if (payDropdownId === null) return;
-    const handler = () => setPayDropdownId(null);
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
-  }, [payDropdownId]);
 
   // ─────────────────────────────────────────────────────────────────────────
   // Summary stats
   // ─────────────────────────────────────────────────────────────────────────
   const totalStudents = students.length;
-  const totalFee      = students.reduce((s, r) => s + r.total_fee,      0);
+  const totalFee      = students.reduce((s, r) => s + Math.max(0, r.total_fee - r.discount), 0);
   const totalPaid     = students.reduce((s, r) => s + r.paid_amount,     0);
   const totalPending  = students.reduce((s, r) => s + r.pending_balance, 0);
 
@@ -266,7 +256,6 @@ const HostelList: React.FC = () => {
   const openDiscount = (s: HostelStudent) => {
     setDiscountTarget(s);
     setDiscountAmount(s.discount ? String(s.discount) : '');
-    setPayDropdownId(null);
     setDiscountModal(true);
   };
 
@@ -476,7 +465,14 @@ const HostelList: React.FC = () => {
                       {/* Fee columns */}
                       <td style={{ fontWeight: 600 }}>{fmt(s.hostel_fee)}</td>
                       <td style={{ fontWeight: 600 }}>{fmt(s.mess_fee)}</td>
-                      <td style={{ fontWeight: 700, color: 'var(--accent)' }}>{fmt(s.total_fee)}</td>
+                      <td style={{ fontWeight: 700, color: 'var(--accent)' }}>
+                        {s.discount > 0 ? (
+                          <div>
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)', textDecoration: 'line-through', marginBottom: 2 }}>{fmt(s.total_fee)}</div>
+                            <span>{fmt(Math.max(0, s.total_fee - s.discount))}</span>
+                          </div>
+                        ) : fmt(s.total_fee)}
+                      </td>
                       <td style={{ fontWeight: 600, color: '#10b981' }}>{fmt(s.paid_amount)}</td>
 
                       {/* Pending badge */}
@@ -501,48 +497,32 @@ const HostelList: React.FC = () => {
                           >
                             <FiEdit2 />
                           </button>
-                          {/* Payment dropdown */}
-                          <div style={{ position: 'relative' }}>
-                            <button
-                              className="action-btn"
-                              title="Payment"
-                              style={{
-                                color: '#10b981', background: 'rgba(16,185,129,0.1)',
-                                border: 'none', borderRadius: 8, width: 32, height: 32,
-                                display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
-                              }}
-                              onClick={e => { e.stopPropagation(); setPayDropdownId(payDropdownId === s.hostel_record_id ? null : s.hostel_record_id); }}
-                            >
-                              <FiDollarSign />
-                            </button>
-                            {payDropdownId === s.hostel_record_id && (
-                              <div onClick={e => e.stopPropagation()} style={{
-                                position: 'absolute', top: '110%', right: 0, zIndex: 999,
-                                background: 'var(--bg-secondary)', border: '1px solid var(--border-light)',
-                                borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
-                                minWidth: 160, overflow: 'hidden',
-                              }}>
-                                <button
-                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-primary)' }}
-                                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
-                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                                  onClick={() => { setPayDropdownId(null); openPay(s); }}
-                                >💰 Record Payment</button>
-                                <button
-                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-primary)' }}
-                                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
-                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                                  onClick={() => openDiscount(s)}
-                                >🏷️ Discount</button>
-                                <button
-                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}
-                                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
-                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                                  onClick={() => setPayDropdownId(null)}
-                                >✕ Cancel</button>
-                              </div>
-                            )}
-                          </div>
+                          {/* Payment — direct action */}
+                          <button
+                            className="action-btn"
+                            title="Record Payment"
+                            style={{
+                              color: '#10b981', background: 'rgba(16,185,129,0.1)',
+                              border: 'none', borderRadius: 8, width: 32, height: 32,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                            }}
+                            onClick={() => openPay(s)}
+                          >
+                            <FiDollarSign />
+                          </button>
+                          {/* Discount — separate action, matching Enrollment Management */}
+                          <button
+                            className="action-btn"
+                            title="Discount"
+                            style={{
+                              color: '#f59e0b', background: 'rgba(245,158,11,0.1)',
+                              border: 'none', borderRadius: 8, width: 32, height: 32,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                            }}
+                            onClick={() => openDiscount(s)}
+                          >
+                            <span style={{ fontSize: 15, lineHeight: 1 }}>🏷️</span>
+                          </button>
                           <button
                             className="action-btn"
                             title="Payment History"
@@ -754,8 +734,9 @@ const HostelList: React.FC = () => {
                 {discountTarget.full_name} — {discountTarget.student_code}
               </div>
               <div style={{ fontSize: 12, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                <span>Total: <strong>{fmt(discountTarget.total_fee)}</strong></span>
+                <span>Actual: <strong style={{ textDecoration: discountTarget.discount > 0 ? 'line-through' : 'none' }}>{fmt(discountTarget.total_fee)}</strong></span>
                 <span>Discount: <strong style={{ color: '#f59e0b' }}>{fmt(discountTarget.discount)}</strong></span>
+                <span>Final: <strong style={{ color: 'var(--teal)' }}>{fmt(Math.max(0, discountTarget.total_fee - discountTarget.discount))}</strong></span>
                 <span>Pending: <strong style={{ color: discountTarget.pending_balance > 0 ? '#ef4444' : '#10b981' }}>
                   {discountTarget.pending_balance <= 0 ? '✓ Cleared' : fmt(discountTarget.pending_balance)}
                 </strong></span>
@@ -774,10 +755,15 @@ const HostelList: React.FC = () => {
                 />
                 {Number(discountAmount) > 0 && (
                   <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                    Final Pending after discount:{' '}
-                    <strong style={{ color: '#10b981' }}>
-                      {fmt(Math.max(0, discountTarget.total_fee - Number(discountAmount) - discountTarget.paid_amount))}
+                    Final Fee after discount:{' '}
+                    <strong style={{ color: 'var(--teal)' }}>
+                      {fmt(Math.max(0, discountTarget.total_fee - Number(discountAmount || 0)))}
                     </strong>
+                    <span style={{ marginLeft: 10 }}>Pending:{' '}
+                      <strong style={{ color: '#ef4444' }}>
+                        {fmt(Math.max(0, discountTarget.total_fee - Number(discountAmount || 0) - discountTarget.paid_amount))}
+                      </strong>
+                    </span>
                   </p>
                 )}
               </div>

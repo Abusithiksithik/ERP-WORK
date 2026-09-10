@@ -115,6 +115,7 @@ router.get('/discontinued', authorize('super_admin', 'admin'), async (req: AuthR
 router.get('/:id/discontinue-details', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+
     const studentRes = await query(
       `SELECT s.*, c.course_name, c.fee_amount, b.batch_name
        FROM students s
@@ -128,40 +129,127 @@ router.get('/:id/discontinue-details', authorize('super_admin', 'admin'), async 
     }
     const student = studentRes.rows[0];
 
+    // Course/enrollment fee data.  The enrollment's saved discount is part of
+    // the final fee calculation, so discontinuation uses the same numbers the
+    // Enrollment Management screen shows.
     const enrollmentsRes = await query(
-      `SELECT e.*, c.course_name FROM enrollments e
+      `SELECT e.*, c.course_name,
+              COALESCE(e.total_fee, 0)::numeric AS calculated_total_fee,
+              COALESCE(e.discount, 0)::numeric AS calculated_discount
+       FROM enrollments e
        LEFT JOIN courses c ON c.id = e.course_id
-       WHERE e.student_id=$1 ORDER BY e.enrolled_at DESC`, [id]
+       WHERE e.student_id=$1
+       ORDER BY e.enrolled_at DESC`, [id]
     );
 
     const paymentsRes = await query(
-      `SELECT p.*, pm.method_type FROM payments p
+      `SELECT p.*, pm.method_type
+       FROM payments p
        LEFT JOIN payment_methods pm ON pm.id = p.payment_method_id
-       WHERE p.student_id=$1 ORDER BY p.payment_date DESC`, [id]
+       WHERE p.student_id=$1
+       ORDER BY p.payment_date DESC`, [id]
     );
 
     const verifiedPayments = paymentsRes.rows.filter((p: any) => p.status === 'verified');
-    const totalPaid  = verifiedPayments.reduce((sum: number, p: any) => sum + parseFloat(p.amount), 0);
-    const courseFee  = parseFloat(student.fee_amount || '0');
-    const pendingDues = Math.max(0, courseFee - totalPaid);
 
-    // Build feeCategories from enrollments for the discontinue modal breakdown
-    const feeCategories = enrollmentsRes.rows.map((e: any) => {
+    const feeCategories: any[] = enrollmentsRes.rows.map((e: any) => {
       const enrollPaid = verifiedPayments
-        .filter((p: any) => p.enrollment_id === e.id)
-        .reduce((s: number, p: any) => s + parseFloat(p.amount), 0);
-      const actual = parseFloat(e.course_fee || '0');
+        .filter((p: any) => Number(p.enrollment_id) === Number(e.id))
+        .reduce((sum: number, p: any) => sum + parseFloat(p.amount || '0'), 0);
+      const actual = parseFloat(e.calculated_total_fee || e.course_fee || '0');
+      const discount = Math.min(Math.max(parseFloat(e.calculated_discount || '0'), 0), actual);
+      const finalFee = Math.max(0, actual - discount);
       return {
         name: e.course_name || 'Course Fee',
         actual,
+        discount,
+        finalFee,
         paid: enrollPaid,
-        remaining: Math.max(0, actual - enrollPaid),
+        remaining: Math.max(0, finalFee - enrollPaid),
       };
     });
 
+    // If an older record has no enrollment, retain the student's course fee as
+    // a fallback so the discontinue check still works.
+    if (feeCategories.length === 0 && parseFloat(student.fee_amount || '0') > 0) {
+      const actual = parseFloat(student.fee_amount || '0');
+      const unassignedPaid = verifiedPayments
+        .filter((p: any) => !p.enrollment_id)
+        .reduce((sum: number, p: any) => sum + parseFloat(p.amount || '0'), 0);
+      feeCategories.push({
+        name: student.course_name || 'Course Fee',
+        actual, discount: 0, finalFee: actual, paid: unassignedPaid,
+        remaining: Math.max(0, actual - unassignedPaid),
+      });
+    }
+
+    const courseFee = feeCategories.reduce((sum, c) => sum + c.actual, 0);
+    const courseDiscount = feeCategories.reduce((sum, c) => sum + c.discount, 0);
+    const coursePaid = feeCategories.reduce((sum, c) => sum + c.paid, 0);
+
+    // Hostel is a separate fee ledger and has its own discount/payment totals.
+    const hostelRes = await query(
+      `SELECT
+         hr.id AS hostel_record_id,
+         (COALESCE(hr.hostel_fee,0) + COALESCE(hr.mess_fee,0))::numeric AS total_fee,
+         COALESCE(hr.discount,0)::numeric AS discount,
+         COALESCE(hr.paid_amount,0)::numeric AS paid_amount,
+         GREATEST(
+           COALESCE(hr.hostel_fee,0) + COALESCE(hr.mess_fee,0)
+           - COALESCE(hr.discount,0) - COALESCE(hr.paid_amount,0), 0
+         )::numeric AS pending_balance
+       FROM hostel_records hr
+       WHERE hr.student_id=$1
+       LIMIT 1`, [id]
+    );
+
+    const hostel = hostelRes.rows[0] || null;
+    if (hostel) {
+      const actual = parseFloat(hostel.total_fee || '0');
+      const discount = Math.min(Math.max(parseFloat(hostel.discount || '0'), 0), actual);
+      const paid = parseFloat(hostel.paid_amount || '0');
+      const finalFee = Math.max(0, actual - discount);
+      feeCategories.push({
+        name: 'Hostel & Mess Fee',
+        actual,
+        discount,
+        finalFee,
+        paid,
+        remaining: Math.max(0, finalFee - paid),
+      });
+    }
+
+    const totalFee = feeCategories.reduce((sum, c) => sum + c.actual, 0);
+    const totalDiscount = feeCategories.reduce((sum, c) => sum + c.discount, 0);
+    const totalFinalFee = Math.max(0, totalFee - totalDiscount);
+    const totalPaid = feeCategories.reduce((sum, c) => sum + c.paid, 0);
+    const pendingDues = Math.max(0, totalFinalFee - totalPaid);
+
+    const hostelFee = hostel ? parseFloat(hostel.total_fee || '0') : 0;
+    const hostelDiscount = hostel ? parseFloat(hostel.discount || '0') : 0;
+    const hostelPaid = hostel ? parseFloat(hostel.paid_amount || '0') : 0;
+    const hostelPendingDues = hostel ? Math.max(0, hostelFee - hostelDiscount - hostelPaid) : 0;
+
     res.json({
       success: true,
-      data: { student, enrollments: enrollmentsRes.rows, payments: paymentsRes.rows, totalPaid, courseFee, pendingDues, feeCategories },
+      data: {
+        student,
+        enrollments: enrollmentsRes.rows,
+        payments: paymentsRes.rows,
+        totalPaid,
+        courseFee,
+        courseDiscount,
+        coursePaid,
+        hostelFee,
+        hostelDiscount,
+        hostelPaid,
+        hostelPendingDues,
+        totalFee,
+        totalDiscount,
+        totalFinalFee,
+        pendingDues,
+        feeCategories,
+      },
     });
   } catch (err) {
     console.error(err);
@@ -183,23 +271,45 @@ router.post('/:id/discontinue', authorize('super_admin', 'admin'), async (req: A
       return;
     }
     if (!force) {
-      const paymentsRes = await query(
-        `SELECT SUM(amount) as total_paid FROM payments WHERE student_id=$1 AND status='verified'`,
+      // Use the same discounted course + hostel ledgers shown in the
+      // discontinue-details popup. Do not treat a course discount as unpaid dues.
+      const enrollmentRes = await query(
+        `SELECT
+           COALESCE(e.total_fee,0)::numeric AS total_fee,
+           COALESCE(e.discount,0)::numeric AS discount,
+           COALESCE((
+             SELECT SUM(p.amount) FROM payments p
+             WHERE p.enrollment_id=e.id AND p.status='verified'
+           ),0)::numeric AS paid
+         FROM enrollments e
+         WHERE e.student_id=$1`,
         [req.params.id]
       );
-      const courseRes = await query('SELECT fee_amount FROM courses WHERE id=$1', [existing.rows[0].course_id]);
-      if (courseRes.rows.length > 0) {
-        const totalPaid  = parseFloat(paymentsRes.rows[0].total_paid || '0');
-        const courseFee  = parseFloat(courseRes.rows[0].fee_amount || '0');
-        const pendingDues = courseFee - totalPaid;
-        if (pendingDues > 0) {
-          res.status(422).json({
-            success: false,
-            message: `Student has pending dues of ₹${pendingDues.toLocaleString()}. Use force=true to proceed anyway.`,
-            pendingDues,
-          });
-          return;
-        }
+      const courseDue = enrollmentRes.rows.reduce((sum: number, r: any) => {
+        const total = parseFloat(r.total_fee || '0');
+        const discount = Math.min(Math.max(parseFloat(r.discount || '0'), 0), total);
+        const paid = parseFloat(r.paid || '0');
+        return sum + Math.max(0, total - discount - paid);
+      }, 0);
+
+      const hostelRes = await query(
+        `SELECT GREATEST(
+           COALESCE(hostel_fee,0) + COALESCE(mess_fee,0)
+           - COALESCE(discount,0) - COALESCE(paid_amount,0), 0
+         )::numeric AS pending
+         FROM hostel_records WHERE student_id=$1 LIMIT 1`,
+        [req.params.id]
+      );
+      const hostelDue = hostelRes.rows.length > 0 ? parseFloat(hostelRes.rows[0].pending || '0') : 0;
+      const pendingDues = Math.max(0, courseDue + hostelDue);
+
+      if (pendingDues > 0) {
+        res.status(422).json({
+          success: false,
+          message: `Student has pending dues of ₹${pendingDues.toLocaleString()}. Use force=true to proceed anyway.`,
+          pendingDues,
+        });
+        return;
       }
     }
     const client = await pool.connect();

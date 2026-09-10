@@ -246,8 +246,8 @@ const barData = courseFinance.map(cf => {
                   <th>Sub Course</th>
                   <th style={{ textAlign: 'center' }}>Candidates</th>
                   <th style={{ textAlign: 'right' }}>Fee/Candidate</th>
+                  <th style={{ textAlign: 'right' }}>Paid</th>
                   <th style={{ textAlign: 'right' }}>Total Fee</th>
-                  <th style={{ textAlign: 'right' }}>Collected</th>
                   <th style={{ textAlign: 'right' }}>Pending</th>
                 </tr>
               </thead>
@@ -260,8 +260,8 @@ const barData = courseFinance.map(cf => {
                     <td style={{ textAlign: 'right', fontSize: 13 }}>
                       {cf.candidate_count > 0 ? fmt(Number(cf.total_fee) / cf.candidate_count) : '—'}
                     </td>
-                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--accent)' }}>{fmt(cf.total_fee)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--teal)' }}>{fmt(cf.paid_amount)}</td>
+                    <td style={{ textAlign: 'right', fontWeight: 600, color: 'var(--accent)' }}>{fmt(cf.total_fee)}</td>
                     <td style={{ textAlign: 'right', fontWeight: 600, color: Number(cf.pending_amount) > 0 ? 'var(--red)' : 'var(--teal)' }}>
                       {fmt(cf.pending_amount)}
                     </td>
@@ -269,8 +269,8 @@ const barData = courseFinance.map(cf => {
                 ))}
                 <tr style={{ borderTop: '2px solid var(--border)', fontWeight: 700 }}>
                   <td colSpan={4} style={{ fontSize: 13 }}>Total</td>
-                  <td style={{ textAlign: 'right', color: 'var(--accent)' }}>{fmt(totalFee)}</td>
                   <td style={{ textAlign: 'right', color: 'var(--teal)' }}>{fmt(totalCollected)}</td>
+                  <td style={{ textAlign: 'right', color: 'var(--accent)' }}>{fmt(totalFee)}</td>
                   <td style={{ textAlign: 'right', color: totalPending > 0 ? 'var(--red)' : 'var(--teal)' }}>{fmt(totalPending)}</td>
                 </tr>
               </tbody>

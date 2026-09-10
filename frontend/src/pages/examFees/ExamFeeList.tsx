@@ -21,10 +21,7 @@ interface ExamFeeRecord {
   course_name?: string;
   batch_name?: string;
   exam_fee: number;
-  other_fee: number;
-  other_fee_note?: string;
   total_fee: number;
-  discount?: number;
   paid_amount: number;
   pending_balance: number;
   notes?: string;
@@ -37,8 +34,6 @@ interface FeeSetting {
   course_id: number;
   course_name?: string;
   exam_fee: number;
-  other_fee: number;
-  other_fee_note?: string;
   notes?: string;
 }
 
@@ -73,7 +68,7 @@ const ExamFeeList: React.FC = () => {
   // Fee Settings modal (common fee per category+course)
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [settingForm, setSettingForm] = useState({
-    category_id: '', course_id: '', exam_fee: '', other_fee: '', other_fee_note: '', notes: '',
+    category_id: '', course_id: '', exam_fee: '', notes: '',
   });
   const [settingLoading, setSettingLoading] = useState(false);
   const [existingSetting, setExistingSetting] = useState<FeeSetting | null>(null);
@@ -82,7 +77,7 @@ const ExamFeeList: React.FC = () => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editRecord, setEditRecord] = useState<ExamFeeRecord | null>(null);
   const [editForm, setEditForm] = useState({
-    exam_fee: '', other_fee: '', other_fee_note: '', notes: '',
+    exam_fee: '', notes: '',
   });
   const [editLoading, setEditLoading] = useState(false);
 
@@ -100,14 +95,6 @@ const ExamFeeList: React.FC = () => {
   const [historyRecord, setHistoryRecord] = useState<ExamFeeRecord | null>(null);
   const [paymentHistory, setPaymentHistory] = useState<Payment[]>([]);
 
-  // Payment action dropdown (Record Payment / Discount / Cancel)
-  const [payDropdownId, setPayDropdownId] = useState<number | null>(null);
-
-  // Discount modal
-  const [showDiscountModal, setShowDiscountModal] = useState(false);
-  const [discountRecord, setDiscountRecord] = useState<ExamFeeRecord | null>(null);
-  const [discountAmount, setDiscountAmount] = useState('');
-  const [discountLoading, setDiscountLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
 
   // Load categories and courses
@@ -147,17 +134,10 @@ const ExamFeeList: React.FC = () => {
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
 
-  // Close pay dropdown when clicking outside
-  useEffect(() => {
-    if (payDropdownId === null) return;
-    const handler = () => setPayDropdownId(null);
-    document.addEventListener('click', handler);
-    return () => document.removeEventListener('click', handler);
-  }, [payDropdownId]);
 
   // ── Fee Settings modal (common fee for a course) ──
   const openSettingsModal = async () => {
-    setSettingForm({ category_id: '', course_id: '', exam_fee: '', other_fee: '', other_fee_note: '', notes: '' });
+    setSettingForm({ category_id: '', course_id: '', exam_fee: '', notes: '' });
     setExistingSetting(null);
     setShowSettingsModal(true);
   };
@@ -174,13 +154,11 @@ const ExamFeeList: React.FC = () => {
         setSettingForm(f => ({
           ...f,
           exam_fee: String(s.exam_fee || 0),
-          other_fee: String(s.other_fee || 0),
-          other_fee_note: s.other_fee_note || '',
           notes: s.notes || '',
         }));
       } else {
         setExistingSetting(null);
-        setSettingForm(f => ({ ...f, exam_fee: '', other_fee: '', other_fee_note: '', notes: '' }));
+        setSettingForm(f => ({ ...f, exam_fee: '', notes: '' }));
       }
     } catch { /* ignore */ }
   };
@@ -194,8 +172,6 @@ const ExamFeeList: React.FC = () => {
         category_id: settingForm.category_id || null,
         course_id: settingForm.course_id,
         exam_fee: settingForm.exam_fee,
-        other_fee: settingForm.other_fee,
-        other_fee_note: settingForm.other_fee_note,
         notes: settingForm.notes,
       };
       if (existingSetting?.id) {
@@ -225,8 +201,6 @@ const ExamFeeList: React.FC = () => {
     setEditRecord(rec);
     setEditForm({
       exam_fee: String(rec.exam_fee),
-      other_fee: String(rec.other_fee),
-      other_fee_note: rec.other_fee_note || '',
       notes: rec.notes || '',
     });
     setShowEditModal(true);
@@ -275,31 +249,6 @@ const ExamFeeList: React.FC = () => {
     }
   };
 
-  // ── Discount ──
-  const openDiscountModal = (rec: ExamFeeRecord) => {
-    setDiscountRecord(rec);
-    setDiscountAmount(rec.discount ? String(rec.discount) : '');
-    setPayDropdownId(null);
-    setShowDiscountModal(true);
-  };
-
-  const handleDiscountSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!discountRecord) return;
-    const amt = Number(discountAmount);
-    if (isNaN(amt) || amt < 0) { toast.error('Enter a valid discount amount'); return; }
-    setDiscountLoading(true);
-    try {
-      await api.post(`/exam-fees/${discountRecord.exam_fee_record_id}/discount`, { discount: amt });
-      toast.success('Discount applied!');
-      setShowDiscountModal(false);
-      fetchRecords();
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to apply discount');
-    } finally {
-      setDiscountLoading(false);
-    }
-  };
 
   // ── Payment history ──
   const openHistoryModal = async (rec: ExamFeeRecord) => {
@@ -448,7 +397,6 @@ const ExamFeeList: React.FC = () => {
                     <th>Candidate</th>
                     <th>Batch</th>
                     <th style={{ textAlign: 'right' }}>Exam Fee</th>
-                    <th style={{ textAlign: 'right' }}>Other Fee</th>
                     <th style={{ textAlign: 'right' }}>Total</th>
                     <th style={{ textAlign: 'right' }}>Paid</th>
                     <th style={{ textAlign: 'right' }}>Pending</th>
@@ -465,12 +413,6 @@ const ExamFeeList: React.FC = () => {
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{rec.batch_name || '—'}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(rec.exam_fee)}</td>
-                      <td style={{ textAlign: 'right' }}>
-                        <div>{rec.other_fee > 0 ? fmt(rec.other_fee) : '—'}</div>
-                        {rec.other_fee_note && (
-                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{rec.other_fee_note}</div>
-                        )}
-                      </td>
                       <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--accent)' }}>{fmt(rec.total_fee)}</td>
                       <td style={{ textAlign: 'right', color: 'var(--teal)', fontWeight: 600 }}>{fmt(rec.paid_amount)}</td>
                       <td style={{ textAlign: 'right', color: rec.pending_balance > 0 ? 'var(--red)' : 'var(--teal)', fontWeight: 600 }}>
@@ -486,43 +428,13 @@ const ExamFeeList: React.FC = () => {
                               <FiEdit2 size={13} />
                             </button>
                           )}
-                          {/* Payment dropdown */}
-                          <div style={{ position: 'relative' }}>
-                            <button
-                              className="btn btn-sm btn-primary"
-                              title="Payment"
-                              onClick={e => { e.stopPropagation(); setPayDropdownId(payDropdownId === rec.exam_fee_record_id ? null : rec.exam_fee_record_id); }}
-                            >
-                              <FiDollarSign size={13} />
-                            </button>
-                            {payDropdownId === rec.exam_fee_record_id && (
-                              <div onClick={e => e.stopPropagation()} style={{
-                                position: 'absolute', top: '110%', right: 0, zIndex: 999,
-                                background: 'var(--bg-secondary)', border: '1px solid var(--border-light)',
-                                borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.18)',
-                                minWidth: 160, overflow: 'hidden',
-                              }}>
-                                <button
-                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-primary)' }}
-                                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
-                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                                  onClick={() => { setPayDropdownId(null); openPayModal(rec); }}
-                                >💰 Record Payment</button>
-                                <button
-                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--text-primary)' }}
-                                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
-                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                                  onClick={() => openDiscountModal(rec)}
-                                >🏷️ Discount</button>
-                                <button
-                                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 14px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--red)' }}
-                                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg-tertiary)')}
-                                  onMouseLeave={e => (e.currentTarget.style.background = 'none')}
-                                  onClick={() => setPayDropdownId(null)}
-                                >✕ Cancel</button>
-                              </div>
-                            )}
-                          </div>
+                          <button
+                            className="btn btn-sm btn-primary"
+                            title="Record Payment"
+                            onClick={() => openPayModal(rec)}
+                          >
+                            <FiDollarSign size={13} />
+                          </button>
                           <button className="btn btn-sm btn-secondary" title="Payment history" onClick={() => openHistoryModal(rec)}>
                             <FiClock size={13} />
                           </button>
@@ -584,35 +496,15 @@ const ExamFeeList: React.FC = () => {
                     ✓ Existing setting found — editing will update all candidate records for this course.
                   </div>
                 )}
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label className="form-label">Exam Fee (₹) *</label>
-                    <input
-                      type="number" className="form-control" placeholder="0" min="0"
-                      value={settingForm.exam_fee}
-                      onChange={e => setSettingForm(f => ({ ...f, exam_fee: e.target.value }))}
-                      required
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Other Fee (₹) <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>optional</span></label>
-                    <input
-                      type="number" className="form-control" placeholder="0" min="0"
-                      value={settingForm.other_fee}
-                      onChange={e => setSettingForm(f => ({ ...f, other_fee: e.target.value }))}
-                    />
-                  </div>
+                <div className="form-group">
+                  <label className="form-label">Exam Fee (₹) *</label>
+                  <input
+                    type="number" className="form-control" placeholder="0" min="0"
+                    value={settingForm.exam_fee}
+                    onChange={e => setSettingForm(f => ({ ...f, exam_fee: e.target.value }))}
+                    required
+                  />
                 </div>
-                {Number(settingForm.other_fee) > 0 && (
-                  <div className="form-group">
-                    <label className="form-label">Other Fee Description</label>
-                    <input
-                      type="text" className="form-control" placeholder="e.g. Lab fee, Certificate fee"
-                      value={settingForm.other_fee_note}
-                      onChange={e => setSettingForm(f => ({ ...f, other_fee_note: e.target.value }))}
-                    />
-                  </div>
-                )}
                 <div className="form-group">
                   <label className="form-label">Notes</label>
                   <textarea
@@ -621,14 +513,6 @@ const ExamFeeList: React.FC = () => {
                     onChange={e => setSettingForm(f => ({ ...f, notes: e.target.value }))}
                   />
                 </div>
-                {(settingForm.exam_fee || settingForm.other_fee) ? (
-                  <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: '10px 16px', marginTop: 8, display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Total Exam Fee per Candidate</span>
-                    <span style={{ fontWeight: 700, color: 'var(--accent)' }}>
-                      {`₹${((Number(settingForm.exam_fee) || 0) + (Number(settingForm.other_fee) || 0)).toLocaleString('en-IN')}`}
-                    </span>
-                  </div>
-                ) : null}
               </div>
               <div className="modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowSettingsModal(false)}>Cancel</button>
@@ -658,34 +542,14 @@ const ExamFeeList: React.FC = () => {
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, fontStyle: 'italic' }}>
                   Note: This edits only this candidate's fee. To change the fee for all candidates in this course, use "Set Course Exam Fee".
                 </div>
-                <div className="form-grid">
-                  <div className="form-group">
-                    <label className="form-label">Exam Fee (₹)</label>
-                    <input
-                      type="number" className="form-control" placeholder="0" min="0"
-                      value={editForm.exam_fee}
-                      onChange={e => setEditForm(f => ({ ...f, exam_fee: e.target.value }))}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Other Fee (₹)</label>
-                    <input
-                      type="number" className="form-control" placeholder="0" min="0"
-                      value={editForm.other_fee}
-                      onChange={e => setEditForm(f => ({ ...f, other_fee: e.target.value }))}
-                    />
-                  </div>
+                <div className="form-group">
+                  <label className="form-label">Exam Fee (₹)</label>
+                  <input
+                    type="number" className="form-control" placeholder="0" min="0"
+                    value={editForm.exam_fee}
+                    onChange={e => setEditForm(f => ({ ...f, exam_fee: e.target.value }))}
+                  />
                 </div>
-                {Number(editForm.other_fee) > 0 && (
-                  <div className="form-group">
-                    <label className="form-label">Other Fee Description</label>
-                    <input
-                      type="text" className="form-control" placeholder="e.g. Lab fee"
-                      value={editForm.other_fee_note}
-                      onChange={e => setEditForm(f => ({ ...f, other_fee_note: e.target.value }))}
-                    />
-                  </div>
-                )}
                 <div className="form-group">
                   <label className="form-label">Notes</label>
                   <textarea
@@ -697,7 +561,7 @@ const ExamFeeList: React.FC = () => {
                 <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: '10px 16px', marginTop: 8, display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>New Total Fee</span>
                   <span style={{ fontWeight: 700, color: 'var(--accent)' }}>
-                    {`₹${((Number(editForm.exam_fee) || 0) + (Number(editForm.other_fee) || 0)).toLocaleString('en-IN')}`}
+                    {fmt(Number(editForm.exam_fee) || 0)}
                   </span>
                 </div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 8 }}>
@@ -785,79 +649,13 @@ const ExamFeeList: React.FC = () => {
                   />
                 </div>
               </div>
-              <div className="modal-footer">
+              <div className="modal-footer" style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowPayModal(false)}>Cancel</button>
                 <button type="submit" className="btn btn-primary" disabled={payLoading}>
                   {payLoading ? 'Recording...' : 'Record Payment'}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* ── DISCOUNT MODAL ── */}
-      {showDiscountModal && discountRecord && (
-        <div className="modal-overlay" onClick={() => setShowDiscountModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
-            <div className="modal-header">
-              <h2 className="modal-title">🏷️ Apply Discount</h2>
-              <button className="modal-close" onClick={() => setShowDiscountModal(false)}>×</button>
-            </div>
-            <div className="modal-body">
-              <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: '10px 14px', marginBottom: 16 }}>
-                <div style={{ fontWeight: 700, marginBottom: 4 }}>{discountRecord.full_name}</div>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                  {discountRecord.course_name}{discountRecord.batch_name ? ` · ${discountRecord.batch_name}` : ''}
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Total Fee</div>
-                    <div style={{ fontWeight: 700, fontSize: 14 }}>{fmt(discountRecord.total_fee)}</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Current Discount</div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--amber)' }}>{fmt(discountRecord.discount ?? 0)}</div>
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Pending Balance</div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: discountRecord.pending_balance > 0 ? 'var(--red)' : 'var(--teal)' }}>
-                      {discountRecord.pending_balance > 0 ? fmt(discountRecord.pending_balance) : '✓ Cleared'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <form onSubmit={handleDiscountSubmit}>
-                <div className="form-group">
-                  <label className="form-label">Discount Amount (₹) *</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    min="0"
-                    step="any"
-                    placeholder="e.g. 2000"
-                    value={discountAmount}
-                    onChange={e => setDiscountAmount(e.target.value)}
-                    autoFocus
-                    required
-                  />
-                  {Number(discountAmount) > 0 && (
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
-                      Final Pending after discount:{' '}
-                      <strong style={{ color: 'var(--teal)' }}>
-                        {fmt(Math.max(0, Number(discountRecord.total_fee) - Number(discountAmount) - Number(discountRecord.paid_amount)))}
-                      </strong>
-                    </p>
-                  )}
-                </div>
-                <div className="modal-footer">
-                  <button type="button" className="btn btn-secondary" onClick={() => setShowDiscountModal(false)}>Cancel</button>
-                  <button type="submit" className="btn btn-primary" disabled={discountLoading}>
-                    {discountLoading ? 'Applying...' : '✓ Apply Discount'}
-                  </button>
-                </div>
-              </form>
-            </div>
           </div>
         </div>
       )}

@@ -12,6 +12,8 @@ import { useAuth } from '../../context/AuthContext';
 interface FeeCategory {
   name: string;
   actual: number;
+  discount: number;
+  finalFee: number;
   paid: number;
   remaining: number;
 }
@@ -22,6 +24,15 @@ interface DiscontinueDetails {
   payments: any[];
   totalPaid: number;
   courseFee: number;
+  courseDiscount: number;
+  coursePaid: number;
+  hostelFee: number;
+  hostelDiscount: number;
+  hostelPaid: number;
+  hostelPendingDues: number;
+  totalFee: number;
+  totalDiscount: number;
+  totalFinalFee: number;
   pendingDues: number;
   feeCategories: FeeCategory[];
 }
@@ -162,12 +173,12 @@ const StudentList: React.FC = () => {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Candidates</h1>
+          <h1 className="page-title">Course</h1>
           <p className="page-subtitle">{total} total candidates</p>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {isAdmin && <button className="btn btn-secondary" onClick={handleExport}><FiDownload /> Export CSV</button>}
-          {isAdmin && <Link to="/students/add" className="btn btn-primary"><FiPlus /> Add Candidate</Link>}
+          {isAdmin && <Link to="/students/add" className="btn btn-primary"><FiPlus /> Add Course</Link>}
         </div>
       </div>
 
@@ -317,11 +328,15 @@ const StudentList: React.FC = () => {
                     <FiDollarSign /> Fee Structure
                   </h3>
 
-                  {/* Summary cards */}
-                  <div className="disc-fee-summary">
+                  {/* Summary cards — course discount and hostel dues are included */}
+                  <div className="disc-fee-summary" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
                     <div className="disc-fee-card disc-fee-card--total">
                       <div className="disc-fee-card__label">Total Fee</div>
-                      <div className="disc-fee-card__value">₹{Number(discontinueDetails.courseFee).toLocaleString()}</div>
+                      <div className="disc-fee-card__value">₹{Number(discontinueDetails.totalFee).toLocaleString()}</div>
+                    </div>
+                    <div className="disc-fee-card" style={{ borderColor: 'rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.06)' }}>
+                      <div className="disc-fee-card__label">Total Discount</div>
+                      <div className="disc-fee-card__value" style={{ color: '#f59e0b' }}>₹{Number(discontinueDetails.totalDiscount).toLocaleString()}</div>
                     </div>
                     <div className="disc-fee-card disc-fee-card--paid">
                       <div className="disc-fee-card__label">Total Paid</div>
@@ -335,24 +350,28 @@ const StudentList: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Category breakdown table */}
+                  {/* Course + Hostel/Mess breakdown */}
                   {discontinueDetails.feeCategories.length > 0 && (
                     <div style={{ background: 'var(--bg-tertiary)', borderRadius: 10, overflow: 'hidden', marginTop: 12 }}>
                       <div style={{ overflowX: 'auto' }}>
-                        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
+                        <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', minWidth: 600 }}>
                           <thead>
                             <tr style={{ background: 'rgba(99,102,241,0.12)' }}>
                               <th style={{ padding: '9px 14px', textAlign: 'left', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Category</th>
                               <th style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Actual</th>
+                              <th style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Discount</th>
+                              <th style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Final Fee</th>
                               <th style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Paid</th>
                               <th style={{ padding: '9px 14px', textAlign: 'right', fontWeight: 700, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Remaining</th>
                             </tr>
                           </thead>
                           <tbody>
                             {discontinueDetails.feeCategories.map((cat, idx) => (
-                              <tr key={cat.name} style={{ borderTop: idx > 0 ? '1px solid var(--border-light)' : 'none' }}>
+                              <tr key={`${cat.name}-${idx}`} style={{ borderTop: idx > 0 ? '1px solid var(--border-light)' : 'none' }}>
                                 <td style={{ padding: '10px 14px', fontWeight: 600 }}>{cat.name}</td>
-                                <td style={{ padding: '10px 14px', textAlign: 'right', color: 'var(--text-secondary)' }}>₹{cat.actual.toLocaleString()}</td>
+                                <td style={{ padding: '10px 14px', textAlign: 'right', color: cat.discount > 0 ? 'var(--text-muted)' : 'var(--text-secondary)', textDecoration: cat.discount > 0 ? 'line-through' : 'none' }}>₹{cat.actual.toLocaleString()}</td>
+                                <td style={{ padding: '10px 14px', textAlign: 'right', color: cat.discount > 0 ? '#f59e0b' : 'var(--text-muted)', fontWeight: cat.discount > 0 ? 700 : 400 }}>₹{cat.discount.toLocaleString()}</td>
+                                <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700 }}>₹{cat.finalFee.toLocaleString()}</td>
                                 <td style={{ padding: '10px 14px', textAlign: 'right', color: 'var(--teal)', fontWeight: 600 }}>₹{cat.paid.toLocaleString()}</td>
                                 <td style={{ padding: '10px 14px', textAlign: 'right' }}>
                                   {cat.remaining > 0 ? (
@@ -367,7 +386,9 @@ const StudentList: React.FC = () => {
                           <tfoot>
                             <tr style={{ borderTop: '2px solid var(--border)', background: 'rgba(0,0,0,0.15)' }}>
                               <td style={{ padding: '10px 14px', fontWeight: 800, fontSize: 13 }}>Total</td>
-                              <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800 }}>₹{Number(discontinueDetails.courseFee).toLocaleString()}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800 }}>₹{Number(discontinueDetails.totalFee).toLocaleString()}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800, color: '#f59e0b' }}>₹{Number(discontinueDetails.totalDiscount).toLocaleString()}</td>
+                              <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800 }}>₹{Number(discontinueDetails.totalFinalFee).toLocaleString()}</td>
                               <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800, color: 'var(--teal)' }}>₹{Number(discontinueDetails.totalPaid).toLocaleString()}</td>
                               <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 800, color: discontinueDetails.pendingDues > 0 ? '#ef4444' : 'var(--teal)' }}>₹{Number(discontinueDetails.pendingDues).toLocaleString()}</td>
                             </tr>
@@ -387,7 +408,7 @@ const StudentList: React.FC = () => {
                         Outstanding Dues: ₹{Number(discontinueDetails.pendingDues).toLocaleString()}
                       </div>
                       <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                        This candidate has unpaid fees. It is recommended to clear dues before discontinuing.
+                        This candidate has unpaid course and/or hostel fees. Discounts already applied are included in the final balance.
                         You may still proceed by clicking <strong>"Discontinue Anyway"</strong>.
                       </div>
                     </div>

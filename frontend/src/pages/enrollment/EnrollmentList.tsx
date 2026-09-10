@@ -6,7 +6,7 @@ import {
 } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../../api/axios';
-import { Enrollment, Course, Student, Batch, CourseCategory, BatchStudent } from '../../types';
+import { Enrollment, Course, Student, Batch, CourseCategory, BatchStudent, PaymentMethod } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 
 /* ─── small helpers ─────────────────────────────────────────── */
@@ -23,7 +23,6 @@ const EnrollmentList: React.FC = () => {
   const [filterStatus, setFilterStatus] = useState('');
   const [showPayModal, setShowPayModal]         = useState(false);
   const [payLoading, setPayLoading]             = useState(false);
-  const [showActionMenu, setShowActionMenu]     = useState<number | null>(null);
   const [showDiscountModal, setShowDiscountModal] = useState(false);
   const [discountLoading, setDiscountLoading]   = useState(false);
   const [discountAmount, setDiscountAmount]     = useState('');
@@ -31,6 +30,7 @@ const EnrollmentList: React.FC = () => {
 
   const [payForm, setPayForm] = useState({
     amount: '', payment_date: new Date().toISOString().split('T')[0],
+    payment_method_id: '',
     notes: '',
   });
 
@@ -38,6 +38,7 @@ const EnrollmentList: React.FC = () => {
   const [categories, setCategories] = useState<CourseCategory[]>([]);
   const [courses, setCourses]       = useState<Course[]>([]);
   const [students, setStudents]     = useState<Student[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
 
   /* ── fetchers ── */
   const fetchEnrollments = useCallback(async () => {
@@ -58,6 +59,9 @@ const EnrollmentList: React.FC = () => {
   useEffect(() => { fetchCourses(); },    [fetchCourses]);
   useEffect(() => {
     api.get('/categories').then(r => setCategories(r.data.data || [])).catch(() => {});
+    // Load all configured payment methods. The payment form can use any method
+    // that exists in Settings, including methods that were previously disabled.
+    api.get('/payment-methods').then(r => setPaymentMethods(r.data.data || [])).catch(() => setPaymentMethods([]));
     if (isAdmin) api.get('/students').then(r => setStudents(r.data.data || [])).catch(() => {});
   }, [isAdmin]);
 
@@ -76,6 +80,7 @@ const EnrollmentList: React.FC = () => {
         enrollment_id: selectedEnrollment.id,
         amount:        Number(payForm.amount),
         payment_date:  payForm.payment_date,
+        payment_method_id: payForm.payment_method_id ? Number(payForm.payment_method_id) : null,
         notes:         payForm.notes,
       });
       toast.success('Payment recorded!');
@@ -88,7 +93,6 @@ const EnrollmentList: React.FC = () => {
   const openDiscountModal = (enr: Enrollment) => {
     setSelectedEnrollment(enr);
     setDiscountAmount(Number(enr.discount || 0) > 0 ? String(enr.discount) : '');
-    setShowActionMenu(null);
     setShowDiscountModal(true);
   };
 
@@ -124,13 +128,22 @@ const EnrollmentList: React.FC = () => {
   /* ── form helpers ── */
   const setP = (f: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setPayForm(p => ({ ...p, [f]: e.target.value }));
 
-  const openPayModal = (enr: Enrollment) => {
+  const openPayModal = async (enr: Enrollment) => {
     setSelectedEnrollment(enr);
     setPayForm({
-      amount:       '',
-      payment_date: new Date().toISOString().split('T')[0],
-      notes:        '',
+      amount:           '',
+      payment_date:     new Date().toISOString().split('T')[0],
+      payment_method_id: '',
+      notes:            '',
     });
+    // Refresh payment methods when opening the modal so newly added/enabled
+    // methods are immediately available without a page reload.
+    try {
+      const r = await api.get('/payment-methods');
+      setPaymentMethods(r.data.data || []);
+    } catch {
+      // Keep any methods already loaded.
+    }
     setShowPayModal(true);
   };
 
@@ -223,30 +236,24 @@ const EnrollmentList: React.FC = () => {
                                 <FiEdit2 />
                               </Link>
 
-                              {/* Course payment actions: Record Payment + Discount */}
-                              <div style={{ position: 'relative', display: 'inline-flex' }}>
-                                <button
-                                  className="action-btn"
-                                  onClick={() => setShowActionMenu(showActionMenu === enr.id ? null : enr.id)}
-                                  title="Course Payment"
-                                  style={{ background: 'rgba(16,185,129,0.12)', color: 'var(--teal)' }}
-                                >
-                                  <FiDollarSign />
-                                </button>
-                                {showActionMenu === enr.id && (
-                                  <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 30, minWidth: 170, padding: 6, borderRadius: 10, background: 'var(--bg-tertiary)', border: '1px solid var(--border-light)', boxShadow: '0 12px 30px rgba(0,0,0,.35)' }}>
-                                    <button type="button" onClick={() => { setShowActionMenu(null); openPayModal(enr); }} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '9px 10px', background: 'transparent', border: 0, color: 'var(--text-primary)', cursor: 'pointer', borderRadius: 7 }}>
-                                      💰 Record Payment
-                                    </button>
-                                    <button type="button" onClick={() => openDiscountModal(enr)} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '9px 10px', background: 'transparent', border: 0, color: 'var(--text-primary)', cursor: 'pointer', borderRadius: 7 }}>
-                                      <FiTag /> Discount
-                                    </button>
-                                    <button type="button" onClick={() => setShowActionMenu(null)} style={{ display: 'flex', width: '100%', alignItems: 'center', gap: 8, padding: '9px 10px', background: 'transparent', border: 0, color: 'var(--red)', cursor: 'pointer', borderRadius: 7 }}>
-                                      ✕ Cancel
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
+                              {/* Payment */}
+                              <button
+                                className="action-btn"
+                                onClick={() => openPayModal(enr)}
+                                title="Record Payment"
+                                style={{ background: 'rgba(16,185,129,0.12)', color: 'var(--teal)' }}
+                              >
+                                <FiDollarSign />
+                              </button>
+                              {/* Discount — separate action */}
+                              <button
+                                className="action-btn"
+                                onClick={() => openDiscountModal(enr)}
+                                title="Discount"
+                                style={{ background: 'rgba(245,158,11,0.12)', color: 'var(--amber)' }}
+                              >
+                                <FiTag />
+                              </button>
                               {/* Materials */}
                               <button
                                 className="action-btn"
@@ -339,6 +346,23 @@ const EnrollmentList: React.FC = () => {
               <div className="form-group">
                 <label className="form-label">Payment Date</label>
                 <input type="date" className="form-control" value={payForm.payment_date} onChange={setP('payment_date')} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Payment Method</label>
+                <select className="form-control" value={payForm.payment_method_id} onChange={e => setPayForm(p => ({ ...p, payment_method_id: e.target.value }))}>
+                  <option value="">Select Payment Method</option>
+                  {paymentMethods.map(method => (
+                    <option key={method.id} value={String(method.id)}>
+                      {method.method_type === 'upi' ? 'UPI' : method.method_type === 'bank' ? 'Bank' : 'Cash'}
+                      {method.upi_id ? ` — ${method.upi_id}` : method.bank_name ? ` — ${method.bank_name}` : method.account_holder_name ? ` — ${method.account_holder_name}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {paymentMethods.length === 0 && (
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 5 }}>
+                    No payment methods configured. Add one in Settings → Payment Methods.
+                  </p>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Notes / Reference</label>

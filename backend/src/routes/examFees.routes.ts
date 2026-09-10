@@ -23,12 +23,10 @@ async function syncPaidAmount(recordId: number): Promise<void> {
 async function autoCreateRecords(client: any): Promise<void> {
   // For each active student with approved enrollment and no existing record
   await client.query(`
-    INSERT INTO exam_fee_records (student_id, exam_fee, other_fee, other_fee_note)
+    INSERT INTO exam_fee_records (student_id, exam_fee)
     SELECT
       s.id,
-      COALESCE(efs.exam_fee, 0),
-      COALESCE(efs.other_fee, 0),
-      efs.other_fee_note
+      COALESCE(efs.exam_fee, 0)
     FROM students s
     JOIN enrollments e ON e.student_id = s.id AND e.status = 'approved'
     LEFT JOIN exam_fee_settings efs
@@ -47,7 +45,7 @@ router.get('/settings', authorize('super_admin', 'admin', 'incharge'), async (re
   try {
     const { category_id, course_id } = req.query;
     let q = `
-      SELECT efs.*, cc.category_name, c.course_name
+      SELECT efs.id, efs.category_id, efs.course_id, efs.exam_fee, efs.notes, cc.category_name, c.course_name
       FROM exam_fee_settings efs
       LEFT JOIN course_categories cc ON cc.id = efs.category_id
       LEFT JOIN courses c ON c.id = efs.course_id
@@ -69,7 +67,7 @@ router.get('/settings', authorize('super_admin', 'admin', 'incharge'), async (re
 router.post('/settings', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
   try {
-    const { category_id, course_id, exam_fee, other_fee, other_fee_note, notes } = req.body;
+    const { category_id, course_id, exam_fee, notes } = req.body;
     if (!course_id) {
       res.status(400).json({ success: false, message: 'course_id is required' });
       return;
@@ -79,17 +77,15 @@ router.post('/settings', authorize('super_admin', 'admin'), async (req: AuthRequ
 
     // Upsert the fee setting
     const result = await client.query(
-      `INSERT INTO exam_fee_settings (category_id, course_id, exam_fee, other_fee, other_fee_note, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO exam_fee_settings (category_id, course_id, exam_fee, notes, created_by)
+       VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (category_id, course_id)
-       DO UPDATE SET exam_fee=$3, other_fee=$4, other_fee_note=$5, notes=$6, updated_at=NOW()
-       RETURNING *`,
+       DO UPDATE SET exam_fee=$3, notes=$4, updated_at=NOW()
+       RETURNING id, category_id, course_id, exam_fee, notes`,
       [
         category_id || null,
         course_id,
         Number(exam_fee) || 0,
-        Number(other_fee) || 0,
-        other_fee_note || null,
         notes || null,
         req.user!.id,
       ]
@@ -98,14 +94,12 @@ router.post('/settings', authorize('super_admin', 'admin'), async (req: AuthRequ
     // Sync exam_fee to existing student records for this course
     await client.query(
       `UPDATE exam_fee_records
-       SET exam_fee = $1, other_fee = $2, other_fee_note = $3
+       SET exam_fee = $1, other_fee = 0, other_fee_note = NULL
        FROM students s
        WHERE exam_fee_records.student_id = s.id
-         AND s.course_id = $4`,
+         AND s.course_id = $2`,
       [
         Number(exam_fee) || 0,
-        Number(other_fee) || 0,
-        other_fee_note || null,
         course_id,
       ]
     );
@@ -128,7 +122,7 @@ router.post('/settings', authorize('super_admin', 'admin'), async (req: AuthRequ
 router.put('/settings/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
   try {
-    const { exam_fee, other_fee, other_fee_note, notes } = req.body;
+    const { exam_fee, notes } = req.body;
 
     await client.query('BEGIN');
 
@@ -145,12 +139,10 @@ router.put('/settings/:id', authorize('super_admin', 'admin'), async (req: AuthR
 
     const result = await client.query(
       `UPDATE exam_fee_settings
-       SET exam_fee=$1, other_fee=$2, other_fee_note=$3, notes=$4, updated_at=NOW()
-       WHERE id=$5 RETURNING *`,
+       SET exam_fee=$1, notes=$2, updated_at=NOW()
+       WHERE id=$3 RETURNING id, category_id, course_id, exam_fee, notes`,
       [
         Number(exam_fee) || 0,
-        Number(other_fee) || 0,
-        other_fee_note || null,
         notes || null,
         req.params.id,
       ]
@@ -159,14 +151,12 @@ router.put('/settings/:id', authorize('super_admin', 'admin'), async (req: AuthR
     // Sync to student records for this course
     await client.query(
       `UPDATE exam_fee_records
-       SET exam_fee = $1, other_fee = $2, other_fee_note = $3
+       SET exam_fee = $1, other_fee = 0, other_fee_note = NULL
        FROM students s
        WHERE exam_fee_records.student_id = s.id
-         AND s.course_id = $4`,
+         AND s.course_id = $2`,
       [
         Number(exam_fee) || 0,
-        Number(other_fee) || 0,
-        other_fee_note || null,
         setting.course_id,
       ]
     );
@@ -205,15 +195,10 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         c.course_name,
         b.batch_name,
         COALESCE(efr.exam_fee, 0)::numeric                                  AS exam_fee,
-        COALESCE(efr.other_fee, 0)::numeric                                 AS other_fee,
-        COALESCE(efr.other_fee_note, '')                                    AS other_fee_note,
-        (COALESCE(efr.exam_fee, 0) + COALESCE(efr.other_fee, 0))::numeric  AS total_fee,
-        COALESCE(efr.discount, 0)::numeric                                  AS discount,
+        COALESCE(efr.exam_fee, 0)::numeric                                  AS total_fee,
         COALESCE(efr.paid_amount, 0)::numeric                               AS paid_amount,
         GREATEST(
-          (COALESCE(efr.exam_fee, 0) + COALESCE(efr.other_fee, 0))
-          - COALESCE(efr.discount, 0)
-          - COALESCE(efr.paid_amount, 0), 0
+          COALESCE(efr.exam_fee, 0) - COALESCE(efr.paid_amount, 0), 0
         )::numeric                                                           AS pending_balance,
         efr.notes,
         efr.created_at,
@@ -299,15 +284,13 @@ router.get('/courses', authorize('super_admin', 'admin', 'incharge'), async (req
 // ─── PUT /api/exam-fees/:id — update individual exam fee record (per-student override) ───
 router.put('/:id', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
   try {
-    const { exam_fee, other_fee, other_fee_note, notes } = req.body;
+    const { exam_fee, notes } = req.body;
     const result = await query(
       `UPDATE exam_fee_records
-       SET exam_fee=$1, other_fee=$2, other_fee_note=$3, notes=$4
-       WHERE id=$5 RETURNING *`,
+       SET exam_fee=$1, other_fee=0, other_fee_note=NULL, notes=$2
+       WHERE id=$3 RETURNING *`,
       [
         Number(exam_fee) || 0,
-        Number(other_fee) || 0,
-        other_fee_note || null,
         notes || null,
         req.params.id,
       ]
@@ -402,9 +385,8 @@ router.post('/:id/payments', authorize('super_admin', 'admin', 'incharge'), asyn
       `SELECT efr.*,
          s.full_name, s.student_id AS student_code,
          c.course_name, b.batch_name,
-         (COALESCE(efr.exam_fee,0) + COALESCE(efr.other_fee,0)) AS total_fee,
-         COALESCE(efr.discount,0) AS discount,
-         GREATEST((COALESCE(efr.exam_fee,0)+COALESCE(efr.other_fee,0))-COALESCE(efr.discount,0)-COALESCE(efr.paid_amount,0),0) AS pending_balance
+         COALESCE(efr.exam_fee,0) AS total_fee,
+         GREATEST(COALESCE(efr.exam_fee,0)-COALESCE(efr.paid_amount,0),0) AS pending_balance
        FROM exam_fee_records efr
        JOIN students s ON s.id = efr.student_id
        LEFT JOIN courses c ON c.id = s.course_id
@@ -422,45 +404,6 @@ router.post('/:id/payments', authorize('super_admin', 'admin', 'incharge'), asyn
   }
 });
 
-// ─── POST /api/exam-fees/:id/discount — apply a per-student discount ───
-router.post('/:id/discount', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
-  try {
-    const recordId = parseInt(req.params.id, 10);
-    if (isNaN(recordId)) {
-      res.status(400).json({ success: false, message: 'Invalid exam fee record ID' });
-      return;
-    }
-    const { discount } = req.body;
-    const discountAmt = parseFloat(discount);
-    if (isNaN(discountAmt) || discountAmt < 0) {
-      res.status(400).json({ success: false, message: 'Discount must be 0 or more' });
-      return;
-    }
-    const result = await query(
-      `UPDATE exam_fee_records
-       SET discount = $1
-       WHERE id = $2
-       RETURNING
-         id,
-         student_id,
-         exam_fee::numeric,
-         other_fee::numeric,
-         discount::numeric,
-         paid_amount::numeric,
-         (exam_fee + other_fee)::numeric AS total_fee,
-         GREATEST((exam_fee + other_fee) - COALESCE(discount,0) - COALESCE(paid_amount,0), 0)::numeric AS pending_balance`,
-      [discountAmt, recordId]
-    );
-    if (result.rows.length === 0) {
-      res.status(404).json({ success: false, message: 'Exam fee record not found' });
-      return;
-    }
-    res.json({ success: true, data: result.rows[0] });
-  } catch (err) {
-    console.error('POST /exam-fees/:id/discount error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
 
 // ─── DELETE /api/exam-fees/payments/:paymentId ───
 router.delete('/payments/:paymentId', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {

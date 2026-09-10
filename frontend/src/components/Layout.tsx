@@ -49,11 +49,11 @@ const Layout: React.FC = () => {
   // Main nav items (without items moved to Settings)
   const navItems = [
     {
-      to: '/new-admissions', icon: <FiUserPlus />, label: 'New Admission',
+      to: '/new-admissions', icon: <FiUserPlus />, label: 'New Candidates',
       show: isAdmin || isIncharge,
     },
     {
-      to: '/students', icon: <FiUsers />, label: 'Candidates',
+      to: '/students', icon: <FiUsers />, label: 'Course',
       show: isAdmin || isIncharge || isTeacher,
     },
     {
