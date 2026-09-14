@@ -257,6 +257,7 @@ const initDb = async () => {
     { name: 'migrate_v11', file: 'migrate_v11.sql' },
     { name: 'migrate_v12', file: 'migrate_v12.sql' },
     { name: 'migrate_v13', file: 'migrate_v13.sql' },
+    { name: 'migrate_v14', file: 'migrate_v14.sql' },
   ];
 
   for (const m of migrations) {

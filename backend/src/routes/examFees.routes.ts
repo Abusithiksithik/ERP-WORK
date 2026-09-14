@@ -196,6 +196,8 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         b.batch_name,
         COALESCE(efr.exam_fee, 0)::numeric                                  AS exam_fee,
         COALESCE(efr.exam_fee, 0)::numeric                                  AS total_fee,
+        COALESCE(efr.discount, 0)::numeric                                   AS discount,
+        GREATEST(COALESCE(efr.exam_fee, 0) - COALESCE(efr.discount, 0), 0)::numeric AS net_payable,
         COALESCE(efr.paid_amount, 0)::numeric                               AS paid_amount,
         GREATEST(
           COALESCE(efr.exam_fee, 0) - COALESCE(efr.paid_amount, 0), 0

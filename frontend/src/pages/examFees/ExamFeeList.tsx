@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { FiEdit2, FiDollarSign, FiClock, FiSearch, FiTrash2, FiSettings } from 'react-icons/fi';
+import { FiEdit2, FiDollarSign, FiClock, FiSearch, FiTrash2, FiSettings, FiFileText, FiPrinter, FiDownload, FiX } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../../api/axios';
 import { useAuth } from '../../context/AuthContext';
@@ -22,6 +22,8 @@ interface ExamFeeRecord {
   batch_name?: string;
   exam_fee: number;
   total_fee: number;
+  discount: number;
+  net_payable: number;
   paid_amount: number;
   pending_balance: number;
   notes?: string;
@@ -96,6 +98,7 @@ const ExamFeeList: React.FC = () => {
   const [paymentHistory, setPaymentHistory] = useState<Payment[]>([]);
 
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [showReport, setShowReport] = useState(false);
 
   // Load categories and courses
   useEffect(() => {
@@ -287,6 +290,33 @@ const ExamFeeList: React.FC = () => {
     return <span className="badge badge-absent">Pending</span>;
   };
 
+  const reportTotals = records.reduce((acc, r) => {
+    acc.examFee += Number(r.exam_fee || 0);
+    acc.discount += Number(r.discount || 0);
+    acc.netPayable += Number(r.net_payable ?? Math.max(Number(r.exam_fee || 0) - Number(r.discount || 0), 0));
+    acc.paid += Number(r.paid_amount || 0);
+    acc.balance += Math.max(Number(r.net_payable ?? Math.max(Number(r.exam_fee || 0) - Number(r.discount || 0), 0)) - Number(r.paid_amount || 0), 0);
+    return acc;
+  }, { examFee: 0, discount: 0, netPayable: 0, paid: 0, balance: 0 });
+
+  const exportReportCsv = () => {
+    const header = ['#', 'Student Name', 'Student ID', 'Course', 'Batch', 'Total Exam Fee', 'Discount', 'Net Payable', 'Amount Paid', 'Balance'];
+    const lines = [header.join(',')];
+    records.forEach((r, i) => {
+      const net = Number(r.net_payable ?? Math.max(Number(r.exam_fee || 0) - Number(r.discount || 0), 0));
+      const balance = Math.max(net - Number(r.paid_amount || 0), 0);
+      lines.push([i + 1, r.full_name, r.student_code, r.course_name || '', r.batch_name || '', Number(r.exam_fee || 0), Number(r.discount || 0), net, Number(r.paid_amount || 0), balance]
+        .map(v => `\"${String(v).replace(/\"/g, '\"\"')}\"`).join(','));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'exam-fee-report.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   // Group records by category → course for display
   const grouped = records.reduce<Record<string, { categoryName: string; courseName: string; items: ExamFeeRecord[] }>>((acc, r) => {
     const key = `${r.category_name || 'No Category'}__${r.course_name || 'No Course'}`;
@@ -306,11 +336,16 @@ const ExamFeeList: React.FC = () => {
           <h1 className="page-title">Exam Fees</h1>
           <p className="page-subtitle">{records.length} candidate{records.length !== 1 ? 's' : ''} with active enrollment</p>
         </div>
-        {isAdmin && (
-          <button className="btn btn-primary" onClick={openSettingsModal}>
-            <FiSettings size={14} style={{ marginRight: 4 }} /> Set Course Exam Fee
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="btn btn-secondary" onClick={() => setShowReport(true)} disabled={records.length === 0}>
+            <FiFileText size={14} style={{ marginRight: 4 }} /> Get Report
           </button>
-        )}
+          {isAdmin && (
+            <button className="btn btn-primary" onClick={openSettingsModal}>
+              <FiSettings size={14} style={{ marginRight: 4 }} /> Set Course Exam Fee
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
@@ -447,6 +482,83 @@ const ExamFeeList: React.FC = () => {
             </div>
           </div>
         ))
+      )}
+
+
+      {showReport && (
+        <div className="modal-overlay" onClick={() => setShowReport(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 1250, width: '96vw', maxHeight: '92vh', overflow: 'auto', background: '#fff', color: '#111' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>Exam Fee Report</h2>
+                <p style={{ margin: '5px 0 0', fontSize: 12, color: '#666' }}>Academic Year — All Exams</p>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-secondary" onClick={exportReportCsv}><FiDownload size={14} /> Export CSV</button>
+                <button className="btn btn-secondary" onClick={() => window.print()}><FiPrinter size={14} /> Print</button>
+                <button className="btn btn-secondary" onClick={() => setShowReport(false)}><FiX size={14} /></button>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 12, marginBottom: 18 }}>
+              {[
+                ['TOTAL STUDENTS', records.length.toString(), 'enrolled'],
+                ['TOTAL EXAM FEE', fmt(reportTotals.examFee), 'gross payable'],
+                ['DISCOUNT GIVEN', fmt(reportTotals.discount), 'discount'],
+                ['AMOUNT PAID', fmt(reportTotals.paid), 'collected'],
+                ['BALANCE DUE', fmt(reportTotals.balance), 'pending'],
+              ].map(([label, value, note]) => (
+                <div key={label} style={{ border: '1px solid #ddd', borderRadius: 10, padding: '13px 15px', background: '#fafafa' }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: '#666', letterSpacing: .5 }}>{label}</div>
+                  <div style={{ fontSize: 21, fontWeight: 800, marginTop: 5 }}>{value}</div>
+                  <div style={{ fontSize: 11, color: '#777', marginTop: 2 }}>{note}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ border: '1px solid #ddd', borderRadius: 8, overflow: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
+                <thead>
+                  <tr style={{ background: '#f1f3f7' }}>
+                    {['#', 'STUDENT NAME', 'STUDENT ID', 'COURSE', 'BATCH', 'TOTAL EXAM FEE', 'DISCOUNT', 'NET PAYABLE', 'AMOUNT PAID', 'BALANCE'].map((h, i) => (
+                      <th key={h} style={{ padding: '10px 9px', textAlign: i >= 5 ? 'right' : 'left', fontSize: 10, fontWeight: 800, borderBottom: '1px solid #ddd', whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {records.map((r, i) => {
+                    const net = Number(r.net_payable ?? Math.max(Number(r.exam_fee || 0) - Number(r.discount || 0), 0));
+                    const balance = Math.max(net - Number(r.paid_amount || 0), 0);
+                    return (
+                      <tr key={r.exam_fee_record_id}>
+                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', fontSize: 12 }}>{i + 1}</td>
+                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', fontWeight: 700, fontSize: 12 }}>{r.full_name}</td>
+                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', fontSize: 11, color: '#555' }}>{r.student_code}</td>
+                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', fontSize: 12 }}>{r.course_name || '—'}</td>
+                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', fontSize: 12 }}>{r.batch_name || '—'}</td>
+                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', textAlign: 'right', fontWeight: 700, fontSize: 12 }}>{fmt(r.exam_fee)}</td>
+                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', textAlign: 'right', fontSize: 12 }}>{Number(r.discount || 0) > 0 ? fmt(r.discount) : '—'}</td>
+                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', textAlign: 'right', fontWeight: 800, fontSize: 12 }}>{fmt(net)}</td>
+                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', textAlign: 'right', color: '#078a69', fontWeight: 700, fontSize: 12 }}>{fmt(r.paid_amount)}</td>
+                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', textAlign: 'right', color: balance > 0 ? '#c0392b' : '#078a69', fontWeight: 800, fontSize: 12 }}>{fmt(balance)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ background: '#f8f9fb' }}>
+                    <td colSpan={5} style={{ padding: '11px 9px', fontWeight: 800, fontSize: 12 }}>TOTAL</td>
+                    <td style={{ padding: '11px 9px', textAlign: 'right', fontWeight: 800, fontSize: 12 }}>{fmt(reportTotals.examFee)}</td>
+                    <td style={{ padding: '11px 9px', textAlign: 'right', fontWeight: 800, fontSize: 12 }}>{fmt(reportTotals.discount)}</td>
+                    <td style={{ padding: '11px 9px', textAlign: 'right', fontWeight: 800, fontSize: 12 }}>{fmt(reportTotals.netPayable)}</td>
+                    <td style={{ padding: '11px 9px', textAlign: 'right', fontWeight: 800, color: '#078a69', fontSize: 12 }}>{fmt(reportTotals.paid)}</td>
+                    <td style={{ padding: '11px 9px', textAlign: 'right', fontWeight: 800, color: reportTotals.balance > 0 ? '#c0392b' : '#078a69', fontSize: 12 }}>{fmt(reportTotals.balance)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── SET COURSE FEE MODAL ── */}

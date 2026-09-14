@@ -325,7 +325,7 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
       `UPDATE hostel_records
        SET hostel_fee = $1,
            mess_fee   = $2,
-           discount   = LEAST(COALESCE(discount,0), $1 + $2),
+         discount = LEAST(COALESCE(discount,0), $1::numeric + $2::numeric),
            notes      = $3
        WHERE id = $4
        RETURNING

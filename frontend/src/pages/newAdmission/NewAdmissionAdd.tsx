@@ -59,6 +59,7 @@ const NewAdmissionAdd: React.FC = () => {
     date_of_birth: '',
     gender: '',
     admission_date: new Date().toISOString().split('T')[0],
+    source: '',
     address: '',
   });
 
@@ -84,6 +85,10 @@ const NewAdmissionAdd: React.FC = () => {
       toast.error('Joining / Admission Date is required');
       return;
     }
+    if (!form.source) {
+      toast.error('Source is required');
+      return;
+    }
 
     setLoading(true);
     try {
@@ -94,6 +99,7 @@ const NewAdmissionAdd: React.FC = () => {
         date_of_birth:  form.date_of_birth || undefined,
         gender:         form.gender || undefined,
         admission_date: form.admission_date,
+        source: form.source || undefined,
         address:        form.address.trim() || undefined,
       });
       toast.success('New admission created successfully');
@@ -202,6 +208,19 @@ const NewAdmissionAdd: React.FC = () => {
             onChange={v => setForm(f => ({ ...f, admission_date: v }))}
             required
           />
+
+          {/* Source */}
+          <div>
+            <label className="form-label">Source <span style={{ color: 'var(--red)' }}>*</span></label>
+            <select className="form-control" value={form.source} onChange={set('source')}>
+              <option value="">Select source</option>
+              <option value="TV Ads">TV Ads</option>
+              <option value="Friend Referral">Friend Referral</option>
+              <option value="Sir Referral">Sir Referral</option>
+              <option value="Social Media">Social Media</option>
+              <option value="Individual">Individual</option>
+            </select>
+          </div>
 
           {/* Address */}
           <div style={{ gridColumn: '1 / -1' }}>

@@ -34,6 +34,7 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (_req: Auth
          na.id          AS admission_id,
          na.student_id,
          na.created_at  AS admission_created_at,
+         na.source,
          s.full_name,
          s.mobile,
          s.email,
@@ -58,7 +59,7 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (_req: Auth
 router.post('/', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
   try {
-    const { full_name, mobile, email, date_of_birth, gender, address, admission_date } = req.body;
+    const { full_name, mobile, email, date_of_birth, gender, address, admission_date, source } = req.body;
 
     const validErr = validateInput(req.body);
     if (validErr) {
@@ -71,6 +72,9 @@ router.post('/', authorize('super_admin', 'admin'), async (req: AuthRequest, res
       : null;
 
     // Keep New Admission gender values aligned with the students table CHECK constraint.
+    const allowedSources = ['TV Ads', 'Friend Referral', 'Sir Referral', 'Social Media', 'Individual'];
+    const sourceNorm = source && allowedSources.includes(String(source).trim()) ? String(source).trim() : null;
+
     const genderNorm = gender && String(gender).trim() !== ''
       ? ({ male: 'Male', female: 'Female', other: 'Other' } as Record<string, string>)[String(gender).trim().toLowerCase()] || null
       : null;
@@ -130,9 +134,9 @@ router.post('/', authorize('super_admin', 'admin'), async (req: AuthRequest, res
 
     // Insert new_admissions row
     const naResult = await client.query(
-      `INSERT INTO new_admissions (student_id) VALUES ($1)
-       RETURNING id AS admission_id, student_id, created_at AS admission_created_at`,
-      [newStudentId]
+      `INSERT INTO new_admissions (student_id, source) VALUES ($1, $2)
+       RETURNING id AS admission_id, student_id, created_at AS admission_created_at, source`,
+      [newStudentId, sourceNorm]
     );
 
     await client.query('COMMIT');
