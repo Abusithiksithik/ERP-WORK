@@ -33,6 +33,8 @@ import studentMaterialsRoutes from './routes/student_materials.routes';
 import hostelRoutes           from './routes/hostel.routes';
 import examFeesRoutes        from './routes/examFees.routes';
 import newAdmissionsRoutes   from './routes/newAdmissions.routes';
+import admissionSourcesRoutes from './routes/admissionSources.routes';
+import reportsRoutes          from './routes/reports.routes';
 
 const app  = express();
 const PORT = process.env.PORT || 5007;
@@ -92,6 +94,8 @@ app.use('/api/student-materials', studentMaterialsRoutes);
 app.use('/api/hostel',            hostelRoutes);
 app.use('/api/exam-fees',         examFeesRoutes);
 app.use('/api/new-admissions',    newAdmissionsRoutes);
+app.use('/api/admission-sources', admissionSourcesRoutes);
+app.use('/api/reports',           reportsRoutes);
 
 // Health check
 app.get('/api/health', async (_req, res) => {
@@ -258,6 +262,7 @@ const initDb = async () => {
     { name: 'migrate_v12', file: 'migrate_v12.sql' },
     { name: 'migrate_v13', file: 'migrate_v13.sql' },
     { name: 'migrate_v14', file: 'migrate_v14.sql' },
+    { name: 'migrate_v15', file: 'migrate_v15.sql' },
   ];
 
   for (const m of migrations) {

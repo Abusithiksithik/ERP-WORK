@@ -26,6 +26,8 @@ import HostelList from './pages/hostel/HostelList';
 import ExamFeeList from './pages/examFees/ExamFeeList';
 import NewAdmissionList from './pages/newAdmission/NewAdmissionList';
 import NewAdmissionAdd from './pages/newAdmission/NewAdmissionAdd';
+import AdmissionSourceList from './pages/settings/AdmissionSourceList';
+import ReportsPage from './pages/reports/ReportsPage';
 
 const ADMIN_ROLES   = ['super_admin', 'admin'];
 const ADMIN_INCHARGE = ['super_admin', 'admin', 'incharge'];
@@ -86,6 +88,8 @@ function App() {
           {/* Payment Methods — Admin only (Settings section) */}
           <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
             <Route path="/payment-methods" element={<PaymentMethodList />} />
+            <Route path="/admission-sources" element={<AdmissionSourceList />} />
+            <Route path="/reports" element={<ReportsPage />} />
           </Route>
 
           {/* Courses — Admin only (Settings section) */}

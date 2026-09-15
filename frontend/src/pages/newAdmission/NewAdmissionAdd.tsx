@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { FiAlertCircle, FiCalendar } from 'react-icons/fi';
@@ -51,6 +51,13 @@ const NewAdmissionAdd: React.FC = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [emailError, setEmailError] = useState('');
+  const [sources, setSources] = useState<{ id: number; source_name: string; is_active: boolean }[]>([]);
+
+  useEffect(() => {
+    api.get('/admission-sources')
+      .then(r => setSources((r.data.data || []).filter((s: any) => s.is_active)))
+      .catch(() => setSources([]));
+  }, []);
 
   const [form, setForm] = useState({
     full_name: '',
@@ -212,13 +219,11 @@ const NewAdmissionAdd: React.FC = () => {
           {/* Source */}
           <div>
             <label className="form-label">Source <span style={{ color: 'var(--red)' }}>*</span></label>
-            <select className="form-control" value={form.source} onChange={set('source')}>
+            <select className="form-control" value={form.source} onChange={set('source')} required>
               <option value="">Select source</option>
-              <option value="TV Ads">TV Ads</option>
-              <option value="Friend Referral">Friend Referral</option>
-              <option value="Sir Referral">Sir Referral</option>
-              <option value="Social Media">Social Media</option>
-              <option value="Individual">Individual</option>
+              {sources.map(source => (
+                <option key={source.id} value={source.source_name}>{source.source_name}</option>
+              ))}
             </select>
           </div>
 

@@ -65,9 +65,10 @@ router.get('/', authorize('super_admin', 'admin', 'incharge', 'teacher'), async 
 router.get('/export', authorize('super_admin', 'admin'), async (_req: AuthRequest, res: Response) => {
   try {
     const result = await query(
-      `SELECT s.student_id, s.full_name, s.mobile, s.email, s.date_of_birth, s.gender,
+      `SELECT s.student_id, s.full_name, s.mobile, s.email,
+              TO_CHAR(s.date_of_birth, 'DD/MM/YYYY') AS date_of_birth, s.gender,
               s.address, s.parent_name, s.parent_mobile, s.guardian_type, s.parent_present,
-              c.course_name, b.batch_name, s.admission_date, s.status
+              c.course_name, b.batch_name, TO_CHAR(s.admission_date, 'DD/MM/YYYY') AS admission_date, s.status
        FROM students s
        LEFT JOIN courses c ON c.id = s.course_id
        LEFT JOIN batches b ON b.id = s.batch_id

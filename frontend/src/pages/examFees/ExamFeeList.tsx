@@ -487,7 +487,7 @@ const ExamFeeList: React.FC = () => {
 
       {showReport && (
         <div className="modal-overlay" onClick={() => setShowReport(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 1250, width: '96vw', maxHeight: '92vh', overflow: 'auto', background: '#fff', color: '#111' }}>
+          <div className="modal report-print-area" onClick={e => e.stopPropagation()} style={{ maxWidth: 1250, width: '96vw', maxHeight: '92vh', overflow: 'auto', background: '#fff', color: '#111' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>Exam Fee Report</h2>
@@ -517,7 +517,7 @@ const ExamFeeList: React.FC = () => {
             </div>
 
             <div style={{ border: '1px solid #ddd', borderRadius: 8, overflow: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
+              <table className="report-table" style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
                 <thead>
                   <tr style={{ background: '#f1f3f7' }}>
                     {['#', 'STUDENT NAME', 'STUDENT ID', 'COURSE', 'BATCH', 'TOTAL EXAM FEE', 'DISCOUNT', 'NET PAYABLE', 'AMOUNT PAID', 'BALANCE'].map((h, i) => (

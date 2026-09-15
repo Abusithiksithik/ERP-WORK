@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import {
   FiHome, FiUsers, FiVideo, FiUser, FiLogOut, FiMenu, FiX, FiUserCheck,
   FiCreditCard, FiCalendar, FiAlertCircle, FiUserX, FiDollarSign, FiSettings,
-  FiBookOpen, FiLayers, FiChevronDown, FiChevronRight, FiFileText, FiUserPlus,
+  FiBookOpen, FiLayers, FiChevronDown, FiChevronRight, FiFileText, FiUserPlus, FiTarget,
 } from 'react-icons/fi';
 
 const Layout: React.FC = () => {
@@ -13,7 +13,7 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const settingsSubPaths = ['/courses', '/batches', '/payment-methods', '/users'];
+  const settingsSubPaths = ['/courses', '/batches', '/payment-methods', '/admission-sources', '/reports', '/users'];
   const isOnSettingsRoute = settingsSubPaths.some(p => location.pathname.startsWith(p));
   const [settingsOpen, setSettingsOpen] = useState(isOnSettingsRoute);
 
@@ -40,8 +40,10 @@ const Layout: React.FC = () => {
   const settingsSubItems = [
     { to: '/courses',         icon: <FiBookOpen />, label: 'Courses'         },
     { to: '/batches',         icon: <FiLayers />,   label: 'Batches'         },
-    { to: '/payment-methods', icon: <FiDollarSign />, label: 'Payment Methods' },
-    { to: '/users',           icon: <FiSettings />,  label: 'Users'           },
+    { to: '/payment-methods',   icon: <FiDollarSign />, label: 'Payment Methods' },
+    { to: '/admission-sources', icon: <FiTarget />,     label: 'Source' },
+    { to: '/reports',           icon: <FiFileText />,   label: 'Reports'           },
+    { to: '/users',             icon: <FiSettings />,   label: 'Users'             },
   ];
 
   const isSettingsActive = settingsSubItems.some(item => location.pathname.startsWith(item.to));

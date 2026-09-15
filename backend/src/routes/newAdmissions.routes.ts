@@ -71,13 +71,23 @@ router.post('/', authorize('super_admin', 'admin'), async (req: AuthRequest, res
       ? String(email).trim().toLowerCase()
       : null;
 
-    // Keep New Admission gender values aligned with the students table CHECK constraint.
-    const allowedSources = ['TV Ads', 'Friend Referral', 'Sir Referral', 'Social Media', 'Individual'];
-    const sourceNorm = source && allowedSources.includes(String(source).trim()) ? String(source).trim() : null;
+    // Source is managed from Settings → Admission Sources.
+    const sourceNorm = source && String(source).trim() !== '' ? String(source).trim() : null;
 
     const genderNorm = gender && String(gender).trim() !== ''
       ? ({ male: 'Male', female: 'Female', other: 'Other' } as Record<string, string>)[String(gender).trim().toLowerCase()] || null
       : null;
+
+    if (sourceNorm) {
+      const sourceCheck = await query(
+        'SELECT 1 FROM admission_sources WHERE source_name=$1 AND is_active=true',
+        [sourceNorm]
+      );
+      if (sourceCheck.rows.length === 0) {
+        res.status(400).json({ success: false, message: 'Please select an active admission source' });
+        return;
+      }
+    }
 
     // Duplicate email checks (only when email provided)
     if (emailNorm) {
