@@ -140,6 +140,54 @@ const barData = courseFinance.map(cf => {
         <Link to="/attendance"  className="btn btn-secondary">📅 Attendance</Link>
       </div>
 
+      {/* Reports — moved out of Settings for quick dashboard access */}
+      <div className="card" style={{ marginBottom: 20 }}>
+        <div style={{ textAlign: 'center', marginBottom: 16 }}>
+          <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>Reports</h3>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+            Quick access to all reports
+          </p>
+        </div>
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+          gap: 12,
+          maxWidth: 900,
+          margin: '0 auto',
+        }}>
+          {[
+            { to: '/reports', icon: '🎓', label: 'Course Report' },
+            { to: '/reports', icon: '📋', label: 'Enrollment Report' },
+            { to: '/reports', icon: '🏠', label: 'Hostel Report' },
+            { to: '/reports', icon: '📝', label: 'Exam Fee Report' },
+          ].map((report) => (
+            <Link
+              key={report.to}
+              to={report.to}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 9,
+                minHeight: 48,
+                padding: '10px 14px',
+                background: 'var(--bg-secondary)',
+                border: '1px solid var(--border)',
+                borderRadius: 10,
+                color: 'var(--text-primary)',
+                textDecoration: 'none',
+                fontSize: 13,
+                fontWeight: 600,
+                transition: 'all 0.15s',
+              }}
+            >
+              <span style={{ fontSize: 18 }}>{report.icon}</span>
+              {report.label}
+            </Link>
+          ))}
+        </div>
+      </div>
+
       {/* Financial summary banner */}
       {examSummary && examSummary.total_fee > 0 && (
         <div className="card" style={{ marginBottom: 20 }}>

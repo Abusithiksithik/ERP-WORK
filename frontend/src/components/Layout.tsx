@@ -42,7 +42,6 @@ const Layout: React.FC = () => {
     { to: '/batches',         icon: <FiLayers />,   label: 'Batches'         },
     { to: '/payment-methods',   icon: <FiDollarSign />, label: 'Payment Methods' },
     { to: '/admission-sources', icon: <FiTarget />,     label: 'Source' },
-    { to: '/reports',           icon: <FiFileText />,   label: 'Reports'           },
     { to: '/users',             icon: <FiSettings />,   label: 'Users'             },
   ];
 
@@ -85,6 +84,10 @@ const Layout: React.FC = () => {
     {
       to: '/profile', icon: <FiUser />, label: 'Profile',
       show: true,
+    },
+    {
+      to: '/reports', icon: <FiFileText />, label: 'Reports',
+      show: isAdmin,
     },
     {
       to: '/dashboard', icon: <FiHome />, label: 'Dashboard',
