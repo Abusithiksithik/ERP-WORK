@@ -487,7 +487,7 @@ const ExamFeeList: React.FC = () => {
 
       {showReport && (
         <div className="modal-overlay" onClick={() => setShowReport(false)}>
-          <div className="modal report-print-area" onClick={e => e.stopPropagation()} style={{ maxWidth: 1250, width: '96vw', maxHeight: '92vh', overflow: 'auto', background: '#fff', color: '#111' }}>
+          <div className="modal report-print-area" onClick={e => e.stopPropagation()} style={{ maxWidth: 1250, width: '96vw', maxHeight: '92vh', overflow: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>Exam Fee Report</h2>
@@ -509,19 +509,19 @@ const ExamFeeList: React.FC = () => {
                 ['BALANCE DUE', fmt(reportTotals.balance), 'pending'],
               ].map(([label, value, note]) => (
                 <div key={label} style={{ border: '1px solid #ddd', borderRadius: 10, padding: '13px 15px', background: '#fafafa' }}>
-                  <div style={{ fontSize: 10, fontWeight: 800, color: '#666', letterSpacing: .5 }}>{label}</div>
-                  <div style={{ fontSize: 21, fontWeight: 800, marginTop: 5 }}>{value}</div>
-                  <div style={{ fontSize: 11, color: '#777', marginTop: 2 }}>{note}</div>
+                  <div className="exam-report-summary-label">{label}</div>
+                  <div className="exam-report-summary-value">{value}</div>
+                  <div className="exam-report-summary-note">{note}</div>
                 </div>
               ))}
             </div>
 
-            <div style={{ border: '1px solid #ddd', borderRadius: 8, overflow: 'auto' }}>
-              <table className="report-table" style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
+            <div className="exam-report-table-wrap">
+              <table className="exam-report-table">
                 <thead>
-                  <tr style={{ background: '#f1f3f7' }}>
+                  <tr>
                     {['#', 'STUDENT NAME', 'STUDENT ID', 'COURSE', 'BATCH', 'TOTAL EXAM FEE', 'DISCOUNT', 'NET PAYABLE', 'AMOUNT PAID', 'BALANCE'].map((h, i) => (
-                      <th key={h} style={{ padding: '10px 9px', textAlign: i >= 5 ? 'right' : 'left', fontSize: 10, fontWeight: 800, borderBottom: '1px solid #ddd', whiteSpace: 'nowrap' }}>{h}</th>
+                      <th key={h} className={i >= 5 ? 'num' : ''}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -531,28 +531,28 @@ const ExamFeeList: React.FC = () => {
                     const balance = Math.max(net - Number(r.paid_amount || 0), 0);
                     return (
                       <tr key={r.exam_fee_record_id}>
-                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', fontSize: 12 }}>{i + 1}</td>
-                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', fontWeight: 700, fontSize: 12 }}>{r.full_name}</td>
-                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', fontSize: 11, color: '#555' }}>{r.student_code}</td>
-                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', fontSize: 12 }}>{r.course_name || '—'}</td>
-                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', fontSize: 12 }}>{r.batch_name || '—'}</td>
-                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', textAlign: 'right', fontWeight: 700, fontSize: 12 }}>{fmt(r.exam_fee)}</td>
-                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', textAlign: 'right', fontSize: 12 }}>{Number(r.discount || 0) > 0 ? fmt(r.discount) : '—'}</td>
-                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', textAlign: 'right', fontWeight: 800, fontSize: 12 }}>{fmt(net)}</td>
-                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', textAlign: 'right', color: '#078a69', fontWeight: 700, fontSize: 12 }}>{fmt(r.paid_amount)}</td>
-                        <td style={{ padding: '9px', borderBottom: '1px solid #eee', textAlign: 'right', color: balance > 0 ? '#c0392b' : '#078a69', fontWeight: 800, fontSize: 12 }}>{fmt(balance)}</td>
+                        <td className="cell">{i + 1}</td>
+                        <td className="cell strong">{r.full_name}</td>
+                        <td className="cell muted">{r.student_code}</td>
+                        <td className="cell">{r.course_name || '—'}</td>
+                        <td className="cell">{r.batch_name || '—'}</td>
+                        <td className="cell num strong">{fmt(r.exam_fee)}</td>
+                        <td className="cell num">{Number(r.discount || 0) > 0 ? fmt(r.discount) : '—'}</td>
+                        <td className="cell num strong">{fmt(net)}</td>
+                        <td className="cell num paid">{fmt(r.paid_amount)}</td>
+                        <td className={`cell num balance ${balance > 0 ? 'due' : 'paid'}`}>{fmt(balance)}</td>
                       </tr>
                     );
                   })}
                 </tbody>
                 <tfoot>
-                  <tr style={{ background: '#f8f9fb' }}>
-                    <td colSpan={5} style={{ padding: '11px 9px', fontWeight: 800, fontSize: 12 }}>TOTAL</td>
-                    <td style={{ padding: '11px 9px', textAlign: 'right', fontWeight: 800, fontSize: 12 }}>{fmt(reportTotals.examFee)}</td>
-                    <td style={{ padding: '11px 9px', textAlign: 'right', fontWeight: 800, fontSize: 12 }}>{fmt(reportTotals.discount)}</td>
-                    <td style={{ padding: '11px 9px', textAlign: 'right', fontWeight: 800, fontSize: 12 }}>{fmt(reportTotals.netPayable)}</td>
-                    <td style={{ padding: '11px 9px', textAlign: 'right', fontWeight: 800, color: '#078a69', fontSize: 12 }}>{fmt(reportTotals.paid)}</td>
-                    <td style={{ padding: '11px 9px', textAlign: 'right', fontWeight: 800, color: reportTotals.balance > 0 ? '#c0392b' : '#078a69', fontSize: 12 }}>{fmt(reportTotals.balance)}</td>
+                  <tr className="total-row">
+                    <td colSpan={5} className="total-cell strong">TOTAL</td>
+                    <td className="total-cell num strong">{fmt(reportTotals.examFee)}</td>
+                    <td className="total-cell num strong">{fmt(reportTotals.discount)}</td>
+                    <td className="total-cell num strong">{fmt(reportTotals.netPayable)}</td>
+                    <td className="total-cell num paid">{fmt(reportTotals.paid)}</td>
+                    <td className={`total-cell num balance ${reportTotals.balance > 0 ? 'due' : 'paid'}`}>{fmt(reportTotals.balance)}</td>
                   </tr>
                 </tfoot>
               </table>
