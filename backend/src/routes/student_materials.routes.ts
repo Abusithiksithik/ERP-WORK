@@ -5,6 +5,9 @@ import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 const router = Router();
 router.use(authenticate);
 
+const UNIFORM_FEE = 3000;
+
+
 // ── GET /api/student-materials?student_id=X ────────────────────────────
 router.get('/', authorize('super_admin', 'admin', 'incharge', 'teacher'), async (req: AuthRequest, res: Response) => {
   try {
@@ -70,15 +73,38 @@ router.delete('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest
 router.get('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge', 'teacher'), async (req: AuthRequest, res: Response) => {
   try {
     const result = await query(
-      `SELECT su.*, u.full_name AS updated_by_name
+      `SELECT su.*, u.full_name AS updated_by_name,
+              $2::numeric AS uniform_fee,
+              (SELECT p.id FROM payments p
+               WHERE p.student_id = su.student_id
+                 AND p.payment_type = 'uniform'
+                 AND p.status = 'verified'
+               ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS payment_id,
+              (SELECT p.amount FROM payments p
+               WHERE p.student_id = su.student_id
+                 AND p.payment_type = 'uniform'
+                 AND p.status = 'verified'
+               ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS payment_amount
        FROM student_uniform su
        LEFT JOIN users u ON u.id = su.updated_by
        WHERE su.student_id = $1`,
-      [req.params.student_id]
+      [req.params.student_id, UNIFORM_FEE]
     );
     if (result.rows.length === 0) {
       // Return default pending status if not set
-      res.json({ success: true, data: { student_id: req.params.student_id, status: 'pending', set_count: 0, notes: null } });
+      const payment = await query(
+        `SELECT p.id AS payment_id, p.amount AS payment_amount
+         FROM payments p
+         WHERE p.student_id=$1 AND p.payment_type='uniform' AND p.status='verified'
+         ORDER BY p.created_at DESC, p.id DESC LIMIT 1`,
+        [req.params.student_id]
+      );
+      res.json({ success: true, data: {
+        student_id: req.params.student_id, status: payment.rows.length ? 'received' : 'pending',
+        set_count: 0, notes: null, uniform_fee: UNIFORM_FEE,
+        payment_id: payment.rows[0]?.payment_id || null,
+        payment_amount: payment.rows[0]?.payment_amount || 0,
+      } });
     } else {
       res.json({ success: true, data: result.rows[0] });
     }
@@ -129,6 +155,55 @@ router.put('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge')
   }
 });
 
+// ── PUT /api/student-materials/uniform/:student_id/payment ─────────────
+// Update the single current uniform payment amount (maximum ₹3,000).
+router.put('/uniform/:student_id/payment', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
+  try {
+    const amount = Number(req.body?.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > UNIFORM_FEE) {
+      res.status(400).json({ success: false, message: `Uniform payment must be between ₹1 and ₹${UNIFORM_FEE}` });
+      return;
+    }
+
+    const student = await query('SELECT id FROM students WHERE id=$1', [req.params.student_id]);
+    if (student.rows.length === 0) {
+      res.status(404).json({ success: false, message: 'Student not found' });
+      return;
+    }
+
+    const existing = await query(
+      `SELECT id FROM payments
+       WHERE student_id=$1 AND payment_type='uniform' AND status='verified'
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [req.params.student_id]
+    );
+
+    let payment;
+    if (existing.rows.length > 0) {
+      payment = await query(
+        `UPDATE payments
+         SET amount=$1, updated_at=NOW()
+         WHERE id=$2 RETURNING *`,
+        [amount, existing.rows[0].id]
+      );
+    } else {
+      payment = await query(
+        `INSERT INTO payments
+           (student_id, enrollment_id, payment_method_id, amount, payment_date,
+            transaction_reference, notes, payment_type, status, verified_by, verified_at)
+         VALUES ($1, NULL, NULL, $2, CURRENT_DATE, NULL, 'Uniform payment', 'uniform', 'verified', $3, NOW())
+         RETURNING *`,
+        [req.params.student_id, amount, req.user!.id]
+      );
+    }
+
+    res.json({ success: true, data: payment.rows[0] });
+  } catch (err) {
+    console.error('PUT /student-materials/uniform payment error:', err);
+    res.status(500).json({ success: false, message: 'Failed to update uniform payment' });
+  }
+});
+
 // ── POST /api/student-materials/uniform/:student_id/receive ────────────
 // Mark uniform received with 1/2 sets and record the manual payment atomically.
 router.post('/uniform/:student_id/receive', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
@@ -141,8 +216,8 @@ router.post('/uniform/:student_id/receive', authorize('super_admin', 'admin', 'i
       res.status(400).json({ success: false, message: 'Select 1 or 2 uniform sets' });
       return;
     }
-    if (!Number.isFinite(payAmount) || payAmount <= 0) {
-      res.status(400).json({ success: false, message: 'Enter a valid payment amount' });
+    if (!Number.isFinite(payAmount) || payAmount <= 0 || payAmount > UNIFORM_FEE) {
+      res.status(400).json({ success: false, message: `Uniform payment must be between ₹1 and ₹${UNIFORM_FEE}` });
       return;
     }
 
@@ -169,20 +244,42 @@ router.post('/uniform/:student_id/receive', authorize('super_admin', 'admin', 'i
       [req.params.student_id]
     );
 
-    const payment = await client.query(
-      `INSERT INTO payments
-         (student_id, enrollment_id, payment_method_id, amount, payment_date,
-          transaction_reference, notes, payment_type, status, verified_by, verified_at)
-       VALUES ($1, NULL, NULL, $2, $3, NULL, $4, 'uniform', 'verified', $5, NOW())
-       RETURNING *`,
-      [
-        req.params.student_id,
-        payAmount,
-        payment_date || new Date().toISOString().split('T')[0],
-        notes || 'Uniform payment',
-        req.user!.id,
-      ]
+    const existingPayment = await client.query(
+      `SELECT id FROM payments
+       WHERE student_id=$1 AND payment_type='uniform' AND status='verified'
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [req.params.student_id]
     );
+
+    let payment;
+    if (existingPayment.rows.length > 0) {
+      payment = await client.query(
+        `UPDATE payments
+         SET amount=$1, payment_date=$2, notes=$3, updated_at=NOW()
+         WHERE id=$4 RETURNING *`,
+        [
+          payAmount,
+          payment_date || new Date().toISOString().split('T')[0],
+          notes || 'Uniform payment',
+          existingPayment.rows[0].id,
+        ]
+      );
+    } else {
+      payment = await client.query(
+        `INSERT INTO payments
+           (student_id, enrollment_id, payment_method_id, amount, payment_date,
+            transaction_reference, notes, payment_type, status, verified_by, verified_at)
+         VALUES ($1, NULL, NULL, $2, $3, NULL, $4, 'uniform', 'verified', $5, NOW())
+         RETURNING *`,
+        [
+          req.params.student_id,
+          payAmount,
+          payment_date || new Date().toISOString().split('T')[0],
+          notes || 'Uniform payment',
+          req.user!.id,
+        ]
+      );
+    }
 
     await client.query('COMMIT');
     res.status(201).json({ success: true, data: { uniform: uniform.rows[0], payment: payment.rows[0] } });

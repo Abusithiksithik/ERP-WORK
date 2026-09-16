@@ -129,9 +129,13 @@ router.get('/uniform', async (_req: AuthRequest, res: Response) => {
         b.batch_name,
         COALESCE(su.status, CASE WHEN s.uniform_received THEN 'received' ELSE 'not_received' END) AS uniform_status,
         COALESCE(su.set_count, 0)::integer AS set_count,
-        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'),0)::numeric AS total_amount,
-        COALESCE((SELECT SUM(p.amount) FROM payments p WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'),0)::numeric AS amount_paid,
-        0::numeric AS balance_due
+        3000::numeric AS total_amount,
+        COALESCE((SELECT p.amount FROM payments p
+          WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'
+          ORDER BY p.created_at DESC, p.id DESC LIMIT 1),0)::numeric AS amount_paid,
+        GREATEST(3000 - COALESCE((SELECT p.amount FROM payments p
+          WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'
+          ORDER BY p.created_at DESC, p.id DESC LIMIT 1),0),0)::numeric AS balance_due
       FROM students s
       LEFT JOIN student_uniform su ON su.student_id=s.id
       LEFT JOIN courses c ON c.id=s.course_id

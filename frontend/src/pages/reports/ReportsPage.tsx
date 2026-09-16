@@ -66,7 +66,7 @@ const UniformTable = ({ rows }: { rows: any[] }) => (
     {['#', 'Student Name', 'Student ID', 'Course', 'Batch', 'Took Uniform?', 'No. of Sets', 'Price / Set', 'Total Amount', 'Amount Paid', 'Balance', 'Status', 'Progress'].map(h => <th key={h}>{h}</th>)}
   </tr></thead><tbody>{rows.map((r, i) => {
     const sets = Number(r.set_count || 0);
-    const total = Number(r.total_amount || 0);
+    const total = Number(r.total_amount || 3000);
     const paid = Number(r.amount_paid || 0);
     const price = sets > 0 ? total / sets : 0;
     const received = r.uniform_status === 'received';
@@ -132,7 +132,7 @@ const ReportsPage: React.FC = () => {
     } else {
       header = ['#', 'Student Name', 'Student ID', 'Course', 'Batch', 'Took Uniform?', 'No. of Sets', 'Price / Set', 'Total Amount', 'Amount Paid', 'Balance', 'Status', 'Progress'];
       data = rows.map((r, i) => {
-        const sets = Number(r.set_count || 0), total = Number(r.total_amount || 0), received = r.uniform_status === 'received';
+        const sets = Number(r.set_count || 0), total = Number(r.total_amount || 3000), received = r.uniform_status === 'received';
         return [i + 1, r.full_name, r.student_code, r.course_name || '', r.batch_name || '', received ? 'Yes' : 'No', sets, sets ? total / sets : 0, total, Number(r.amount_paid || 0), Number(r.balance_due || 0), received ? 'Received' : 'Not Received', received ? '100%' : '0%'];
       });
     }

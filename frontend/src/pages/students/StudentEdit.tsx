@@ -6,6 +6,8 @@ import { Link } from 'react-router-dom';
 import api from '../../api/axios';
 import { CourseCategory, Course, Batch } from '../../types';
 
+const UNIFORM_FEE = 3000;
+
 interface CertFile { file: File | null; preview: string | null; existingUrl?: string; }
 
 const fmtDate = (iso: string) => {
@@ -103,6 +105,15 @@ const StudentEdit: React.FC = () => {
           admission_date:         s.admission_date ? s.admission_date.split('T')[0] : new Date().toISOString().split('T')[0],
           accommodation_type:     s.accommodation_type || 'day_scholar',
         });
+
+        try {
+          const uRes = await api.get(`/student-materials/uniform/${id}`);
+          const u = uRes.data.data || {};
+          if (u.status === 'received') {
+            setUniformSetCount([1, 2].includes(Number(u.set_count)) ? Number(u.set_count) as 1 | 2 : 1);
+            setUniformPayment(u.payment_amount ? String(u.payment_amount) : '');
+          }
+        } catch { /* uniform details are optional */ }
 
         if (s.photo_url) setPhotoPreview(s.photo_url);
         setCertFiles({
@@ -239,11 +250,13 @@ const StudentEdit: React.FC = () => {
       }
 
       if ((form as any).uniform_received && uniformPayment && Number(uniformPayment) > 0) {
-        await api.post(`/student-materials/uniform/${id}/receive`, {
-          set_count: uniformSetCount,
-          amount: Number(uniformPayment),
-          payment_date: form.admission_date,
-        });
+        const amount = Number(uniformPayment);
+        if (amount > UNIFORM_FEE) {
+          toast.error(`Uniform payment cannot exceed ₹${UNIFORM_FEE}`);
+          return;
+        }
+        await api.put(`/student-materials/uniform/${id}/payment`, { amount });
+        await api.put(`/student-materials/uniform/${id}`, { status: 'received', set_count: uniformSetCount });
       }
 
       // Upload new consent files if changed
@@ -424,9 +437,8 @@ const StudentEdit: React.FC = () => {
         {/* ── Uniform ── */}
         <div className="card" style={{ marginBottom: 16 }}>
           <h3 className="section-heading">👕 Uniform</h3>
-          <label style={{
-            display: 'flex', alignItems: 'center', gap: 14, cursor: 'pointer', userSelect: 'none',
-            padding: '14px 18px', borderRadius: 10,
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderRadius: 10,
             border: `2px solid ${form.uniform_received ? 'var(--teal)' : 'var(--border-light)'}`,
             background: form.uniform_received ? 'rgba(16,185,129,0.07)' : 'var(--bg-tertiary)',
             transition: 'all 0.2s',
@@ -440,13 +452,23 @@ const StudentEdit: React.FC = () => {
                 }
               }}
               style={{ width: 20, height: 20, accentColor: 'var(--teal)', cursor: 'pointer', flexShrink: 0 }} />
-            <div>
+            <div style={{ flex: 1 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: form.uniform_received ? 'var(--teal)' : 'var(--text-primary)' }}>
                 {form.uniform_received ? '✅ Uniform Received' : '⬜ Uniform Not Received'}
               </div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Check if student has received uniform</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {form.uniform_received && uniformPayment ? `Paid: ₹${Number(uniformPayment).toLocaleString('en-IN')} · ${uniformSetCount} set${uniformSetCount > 1 ? 's' : ''}` : 'Check if student has received uniform'}
+              </div>
             </div>
-          </label>
+            {form.uniform_received && (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => {
+                setUniformSetupStep('payment');
+                setShowUniformSetup(true);
+              }}>
+                Edit Uniform
+              </button>
+            )}
+          </div>
         </div>
 
         {/* ── Accommodation Type ── */}
@@ -668,16 +690,26 @@ const StudentEdit: React.FC = () => {
                 <div>
                   <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
                     <strong style={{ color: 'var(--teal)' }}>✅ {uniformSetCount} set{uniformSetCount > 1 ? 's' : ''} selected</strong>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Fixed uniform fee: ₹{UNIFORM_FEE.toLocaleString('en-IN')}</div>
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Manual Payment Amount ₹ *</label>
-                    <input type="number" className="form-control" value={uniformPayment} onChange={e => setUniformPayment(e.target.value)} min={0.01} step="0.01" placeholder="Enter amount" autoFocus required />
+                    <label className="form-label">Manual Payment Amount ₹ * <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(max ₹{UNIFORM_FEE.toLocaleString('en-IN')})</span></label>
+                    <input type="number" className="form-control" value={uniformPayment} onChange={e => setUniformPayment(e.target.value)} min={0.01} max={UNIFORM_FEE} step="0.01" placeholder="Enter amount" autoFocus required />
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
-                    <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
-                      if (Number(uniformPayment) <= 0) { toast.error('Enter a valid payment amount'); return; }
-                      setForm((f: any) => ({ ...f, uniform_received: true }));
-                      setShowUniformSetup(false);
+                    <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={async () => {
+                      const amount = Number(uniformPayment);
+                      if (!Number.isFinite(amount) || amount <= 0) { toast.error('Enter a valid payment amount'); return; }
+                      if (amount > UNIFORM_FEE) { toast.error(`Uniform payment cannot exceed ₹${UNIFORM_FEE}`); return; }
+                      try {
+                        await api.put(`/student-materials/uniform/${id}/payment`, { amount });
+                        await api.put(`/student-materials/uniform/${id}`, { status: 'received', set_count: uniformSetCount });
+                        setForm((f: any) => ({ ...f, uniform_received: true }));
+                        setShowUniformSetup(false);
+                        toast.success('Uniform updated successfully');
+                      } catch (err: any) {
+                        toast.error(err.response?.data?.message || 'Failed to update uniform');
+                      }
                     }}>✓ Save Uniform</button>
                     <button type="button" className="btn btn-secondary" onClick={() => setUniformSetupStep('sets')}>Back</button>
                   </div>
