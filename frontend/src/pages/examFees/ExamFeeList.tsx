@@ -293,19 +293,18 @@ const ExamFeeList: React.FC = () => {
   const reportTotals = records.reduce((acc, r) => {
     acc.examFee += Number(r.exam_fee || 0);
     acc.discount += Number(r.discount || 0);
-    acc.netPayable += Number(r.net_payable ?? Math.max(Number(r.exam_fee || 0) - Number(r.discount || 0), 0));
     acc.paid += Number(r.paid_amount || 0);
     acc.balance += Math.max(Number(r.net_payable ?? Math.max(Number(r.exam_fee || 0) - Number(r.discount || 0), 0)) - Number(r.paid_amount || 0), 0);
     return acc;
-  }, { examFee: 0, discount: 0, netPayable: 0, paid: 0, balance: 0 });
+  }, { examFee: 0, discount: 0, paid: 0, balance: 0 });
 
   const exportReportCsv = () => {
-    const header = ['#', 'Student Name', 'Student ID', 'Course', 'Batch', 'Total Exam Fee', 'Discount', 'Net Payable', 'Amount Paid', 'Balance'];
+    const header = ['#', 'Student Name', 'Student ID', 'Course', 'Batch', 'Total Exam Fee', 'Discount', 'Amount Paid', 'Balance'];
     const lines = [header.join(',')];
     records.forEach((r, i) => {
       const net = Number(r.net_payable ?? Math.max(Number(r.exam_fee || 0) - Number(r.discount || 0), 0));
       const balance = Math.max(net - Number(r.paid_amount || 0), 0);
-      lines.push([i + 1, r.full_name, r.student_code, r.course_name || '', r.batch_name || '', Number(r.exam_fee || 0), Number(r.discount || 0), net, Number(r.paid_amount || 0), balance]
+      lines.push([i + 1, r.full_name, r.student_code, r.course_name || '', r.batch_name || '', Number(r.exam_fee || 0), Number(r.discount || 0), Number(r.paid_amount || 0), balance]
         .map(v => `\"${String(v).replace(/\"/g, '\"\"')}\"`).join(','));
     });
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
@@ -487,11 +486,11 @@ const ExamFeeList: React.FC = () => {
 
       {showReport && (
         <div className="modal-overlay" onClick={() => setShowReport(false)}>
-          <div className="modal report-print-area" onClick={e => e.stopPropagation()} style={{ maxWidth: 1250, width: '96vw', maxHeight: '92vh', overflow: 'auto' }}>
+          <div className="modal exam-report-modal report-print-area" onClick={e => e.stopPropagation()} style={{ maxWidth: 1250, width: '96vw', maxHeight: '92vh', overflow: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 18 }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>Exam Fee Report</h2>
-                <p style={{ margin: '5px 0 0', fontSize: 12, color: '#666' }}>Academic Year — All Exams</p>
+                <h2 className="exam-report-modal-title">Exam Fee Report</h2>
+                <p className="exam-report-modal-subtitle">Academic Year — All Exams</p>
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn btn-secondary" onClick={exportReportCsv}><FiDownload size={14} /> Export CSV</button>
@@ -508,7 +507,7 @@ const ExamFeeList: React.FC = () => {
                 ['AMOUNT PAID', fmt(reportTotals.paid), 'collected'],
                 ['BALANCE DUE', fmt(reportTotals.balance), 'pending'],
               ].map(([label, value, note]) => (
-                <div key={label} style={{ border: '1px solid #ddd', borderRadius: 10, padding: '13px 15px', background: '#fafafa' }}>
+                <div key={label} className="exam-report-summary-card">
                   <div className="exam-report-summary-label">{label}</div>
                   <div className="exam-report-summary-value">{value}</div>
                   <div className="exam-report-summary-note">{note}</div>
@@ -520,7 +519,7 @@ const ExamFeeList: React.FC = () => {
               <table className="exam-report-table">
                 <thead>
                   <tr>
-                    {['#', 'STUDENT NAME', 'STUDENT ID', 'COURSE', 'BATCH', 'TOTAL EXAM FEE', 'DISCOUNT', 'NET PAYABLE', 'AMOUNT PAID', 'BALANCE'].map((h, i) => (
+                    {['#', 'STUDENT NAME', 'STUDENT ID', 'COURSE', 'BATCH', 'TOTAL EXAM FEE', 'DISCOUNT', 'AMOUNT PAID', 'BALANCE'].map((h, i) => (
                       <th key={h} className={i >= 5 ? 'num' : ''}>{h}</th>
                     ))}
                   </tr>
@@ -538,7 +537,6 @@ const ExamFeeList: React.FC = () => {
                         <td className="cell">{r.batch_name || '—'}</td>
                         <td className="cell num strong">{fmt(r.exam_fee)}</td>
                         <td className="cell num">{Number(r.discount || 0) > 0 ? fmt(r.discount) : '—'}</td>
-                        <td className="cell num strong">{fmt(net)}</td>
                         <td className="cell num paid">{fmt(r.paid_amount)}</td>
                         <td className={`cell num balance ${balance > 0 ? 'due' : 'paid'}`}>{fmt(balance)}</td>
                       </tr>
@@ -550,7 +548,6 @@ const ExamFeeList: React.FC = () => {
                     <td colSpan={5} className="total-cell strong">TOTAL</td>
                     <td className="total-cell num strong">{fmt(reportTotals.examFee)}</td>
                     <td className="total-cell num strong">{fmt(reportTotals.discount)}</td>
-                    <td className="total-cell num strong">{fmt(reportTotals.netPayable)}</td>
                     <td className="total-cell num paid">{fmt(reportTotals.paid)}</td>
                     <td className={`total-cell num balance ${reportTotals.balance > 0 ? 'due' : 'paid'}`}>{fmt(reportTotals.balance)}</td>
                   </tr>

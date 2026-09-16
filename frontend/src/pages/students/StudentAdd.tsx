@@ -54,6 +54,8 @@ const StudentAdd: React.FC = () => {
     consent_given: false,
     admission_date: new Date().toISOString().split('T')[0],
     uniform_received: false,
+    uniform_set_count: 0,
+    uniform_payment: '',
     accommodation_type: 'day_scholar',
   });
 
@@ -71,6 +73,11 @@ const StudentAdd: React.FC = () => {
   const [initialPayment, setInitialPayment] = useState('');
   const [paymentMethod, setPaymentMethod]   = useState('cash');
   const [payLater, setPayLater]             = useState(false);
+
+  // Uniform setup
+  const [showUniformSetup, setShowUniformSetup] = useState(false);
+  const [uniformSetupStep, setUniformSetupStep] = useState<'sets' | 'payment'>('sets');
+  const [uniformSetCount, setUniformSetCount] = useState<1 | 2>(1);
 
   // Internship plan
   const [showInternship, setShowInternship]       = useState(false);
@@ -211,6 +218,14 @@ const StudentAdd: React.FC = () => {
 
       const res = await api.post('/students', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       const studentId = res.data.data.id;
+
+      if (form.uniform_received && Number(form.uniform_set_count) > 0 && Number(form.uniform_payment) > 0) {
+        await api.post(`/student-materials/uniform/${studentId}/receive`, {
+          set_count: Number(form.uniform_set_count),
+          amount: Number(form.uniform_payment),
+          payment_date: form.admission_date,
+        });
+      }
 
       // Upload certificates
       const certMap: Record<string, string> = {
@@ -594,7 +609,15 @@ const StudentAdd: React.FC = () => {
             transition: 'all 0.2s',
           }}>
             <input type="checkbox" checked={form.uniform_received}
-              onChange={e => setForm(f => ({ ...f, uniform_received: e.target.checked }))}
+              onChange={e => {
+                if (e.target.checked) {
+                  setUniformSetCount(1);
+                  setUniformSetupStep('sets');
+                  setShowUniformSetup(true);
+                } else {
+                  setForm(f => ({ ...f, uniform_received: false, uniform_set_count: 0, uniform_payment: '' }));
+                }
+              }}
               style={{ width: 20, height: 20, accentColor: 'var(--teal)', cursor: 'pointer', flexShrink: 0 }} />
             <div>
               <div style={{ fontSize: 14, fontWeight: 700, color: form.uniform_received ? 'var(--teal)' : 'var(--text-primary)' }}>
@@ -757,6 +780,49 @@ const StudentAdd: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Uniform setup modal */}
+        {showUniformSetup && (
+          <div className="modal-overlay">
+            <div className="modal" style={{ maxWidth: 430 }}>
+              <div className="modal-header">
+                <h2 className="modal-title">👕 Uniform</h2>
+                <button type="button" className="modal-close" onClick={() => setShowUniformSetup(false)}>×</button>
+              </div>
+              {uniformSetupStep === 'sets' ? (
+                <div>
+                  <label className="form-label" style={{ marginBottom: 12 }}>How many uniform sets?</label>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    {([1, 2] as const).map(count => (
+                      <button key={count} type="button" className={`uniform-set-option ${uniformSetCount === count ? 'selected' : ''}`} onClick={() => { setUniformSetCount(count); setUniformSetupStep('payment'); }}>
+                        <strong>{count}</strong><span>{count === 1 ? 'Set' : 'Sets'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
+                    <strong style={{ color: 'var(--teal)' }}>✅ {uniformSetCount} set{uniformSetCount > 1 ? 's' : ''} selected</strong>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Manual Payment Amount ₹ *</label>
+                    <input id="add-uniform-payment" type="number" className="form-control" min={0.01} step="0.01" placeholder="Enter amount" autoFocus required
+                      onChange={e => setForm(f => ({ ...f, uniform_payment: e.target.value }))} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
+                      if (Number(form.uniform_payment) <= 0) { toast.error('Enter a valid payment amount'); return; }
+                      setForm(f => ({ ...f, uniform_received: true, uniform_set_count: uniformSetCount }));
+                      setShowUniformSetup(false);
+                    }}>✓ Save Uniform</button>
+                    <button type="button" className="btn btn-secondary" onClick={() => setUniformSetupStep('sets')}>Back</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Submit */}
         <div style={{ display: 'flex', gap: 12 }}>

@@ -56,7 +56,7 @@ router.post('/', authorize('super_admin', 'admin', 'incharge'), async (req: Auth
   try {
     const {
       student_id, enrollment_id, payment_method_id,
-      amount, payment_date, transaction_reference, notes,
+      amount, payment_date, transaction_reference, notes, payment_type, fee_type,
     } = req.body;
     if (!student_id || !amount || Number(amount) <= 0) {
       res.status(400).json({ success: false, message: 'student_id and a positive amount are required' });
@@ -85,8 +85,8 @@ router.post('/', authorize('super_admin', 'admin', 'incharge'), async (req: Auth
     const result = await query(
       `INSERT INTO payments
          (student_id, enrollment_id, payment_method_id, amount, payment_date,
-          transaction_reference, notes, status, verified_by, verified_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'verified',$8,NOW()) RETURNING *`,
+          transaction_reference, notes, payment_type, status, verified_by, verified_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'verified',$9,NOW()) RETURNING *`,
       [
         student_id,
         enrollment_id   || null,
@@ -95,6 +95,7 @@ router.post('/', authorize('super_admin', 'admin', 'incharge'), async (req: Auth
         payment_date || new Date().toISOString().split('T')[0],
         transaction_reference || null,
         notes || null,
+        payment_type || fee_type || 'course_fee',
         req.user!.id,
       ]
     );
@@ -132,7 +133,7 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
   try {
     const {
       student_id, enrollment_id, payment_method_id,
-      amount, payment_date, transaction_reference, notes, status,
+      amount, payment_date, transaction_reference, notes, status, payment_type, fee_type,
     } = req.body;
     if (!student_id || !amount) {
       res.status(400).json({ success: false, message: 'student_id and amount required' });
@@ -141,8 +142,8 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
     const result = await query(
       `UPDATE payments
        SET student_id=$1, enrollment_id=$2, payment_method_id=$3, amount=$4,
-           payment_date=$5, transaction_reference=$6, notes=$7, status=$8
-       WHERE id=$9 RETURNING *`,
+           payment_date=$5, transaction_reference=$6, notes=$7, payment_type=$8, status=$9
+       WHERE id=$10 RETURNING *`,
       [
         student_id,
         enrollment_id   || null,
@@ -151,6 +152,7 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
         payment_date || new Date().toISOString().split('T')[0],
         transaction_reference || null,
         notes || null,
+        payment_type || fee_type || 'course_fee',
         status || 'verified',
         req.params.id,
       ]

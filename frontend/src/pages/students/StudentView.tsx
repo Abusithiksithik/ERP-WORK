@@ -33,6 +33,7 @@ interface StudentMaterial {
 interface UniformStatus {
   student_id: number | string;
   status: 'received' | 'not_received' | 'pending';
+  set_count?: number;
   notes?: string;
 }
 
@@ -56,7 +57,10 @@ const StudentView: React.FC = () => {
   // Uniform modal
   const [showUniformModal, setShowUniformModal]   = useState(false);
   const [uniformStatus, setUniformStatus]         = useState<'received' | 'not_received' | 'pending'>('pending');
-  const [uniformNotes, setUniformNotes]           = useState('');
+  const [uniformSetCount, setUniformSetCount]     = useState<1 | 2>(1);
+  const [uniformPayment, setUniformPayment]       = useState('');
+  const [uniformPaymentDate, setUniformPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [uniformStep, setUniformStep]             = useState<'status' | 'sets' | 'payment'>('status');
   const [uniformLoading, setUniformLoading]       = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -134,21 +138,58 @@ const StudentView: React.FC = () => {
   };
 
   // ── Update Uniform ──────────────────────────────────────────────────
-  const handleUniformSubmit = async () => {
+  const handleUniformSimpleStatus = async (status: 'not_received' | 'pending') => {
     setUniformLoading(true);
     try {
-      await api.put(`/student-materials/uniform/${id}`, { status: uniformStatus, notes: uniformNotes || undefined });
-      toast.success('Uniform status updated!');
+      await api.put(`/student-materials/uniform/${id}`, { status });
+      toast.success(status === 'pending' ? 'Uniform marked pending' : 'Uniform marked not received');
       setShowUniformModal(false);
       fetchData();
     } catch { toast.error('Failed to update uniform status'); }
     finally { setUniformLoading(false); }
   };
 
+  const handleUniformPaymentSubmit = async () => {
+    const amount = Number(uniformPayment);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Enter a valid payment amount');
+      return;
+    }
+    setUniformLoading(true);
+    try {
+      await api.post(`/student-materials/uniform/${id}/receive`, {
+        set_count: uniformSetCount,
+        amount,
+        payment_date: uniformPaymentDate,
+      });
+      toast.success(`Uniform received — ${uniformSetCount} set${uniformSetCount > 1 ? 's' : ''} and payment saved!`);
+      setShowUniformModal(false);
+      fetchData();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to save uniform and payment');
+    } finally {
+      setUniformLoading(false);
+    }
+  };
+
   const openUniformModal = () => {
     setUniformStatus(uniform?.status || 'pending');
-    setUniformNotes(uniform?.notes || '');
+    setUniformSetCount(uniform?.set_count === 2 ? 2 : 1);
+    setUniformPayment('');
+    setUniformPaymentDate(new Date().toISOString().split('T')[0]);
+    setUniformStep('status');
     setShowUniformModal(true);
+  };
+
+  const chooseUniformStatus = (status: 'received' | 'not_received' | 'pending') => {
+    setUniformStatus(status);
+    if (status === 'received') setUniformStep('sets');
+    else handleUniformSimpleStatus(status);
+  };
+
+  const chooseUniformSets = (count: 1 | 2) => {
+    setUniformSetCount(count);
+    setUniformStep('payment');
   };
 
   // ── Delete Material ──────────────────────────────────────────────────
@@ -593,43 +634,85 @@ const StudentView: React.FC = () => {
         </div>
       )}
 
-      {/* ── Uniform Status Modal ── */}
+      {/* ── Uniform Status / Sets / Payment Modal ── */}
       {showUniformModal && (
         <div className="modal-overlay">
-          <div className="modal" style={{ maxWidth: 400 }}>
+          <div className="modal" style={{ maxWidth: 430 }}>
             <div className="modal-header">
-              <h2 className="modal-title">👕 Uniform Status</h2>
+              <div>
+                <h2 className="modal-title">👕 Uniform</h2>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{student.full_name} · {student.student_id}</p>
+              </div>
               <button className="modal-close" onClick={() => setShowUniformModal(false)}><FiX /></button>
             </div>
-            <div style={{ marginBottom: 20 }}>
-              <label className="form-label" style={{ marginBottom: 12 }}>Select uniform status:</label>
-              <div className="uniform-status-group">
-                {([
-                  { value: 'received',     label: '✅ Received',     cls: 'selected-received' },
-                  { value: 'not_received', label: '❌ Not Received', cls: 'selected-not_received' },
-                  { value: 'pending',      label: '⏳ Pending',      cls: 'selected-pending' },
-                ] as const).map(opt => (
-                  <button
-                    key={opt.value} type="button"
-                    className={`uniform-status-btn ${uniformStatus === opt.value ? opt.cls : ''}`}
-                    onClick={() => setUniformStatus(opt.value)}
-                  >
-                    {opt.label}
+
+            {uniformStep === 'status' && (
+              <div>
+                <label className="form-label" style={{ marginBottom: 12 }}>Uniform status</label>
+                <div className="uniform-status-group">
+                  <button type="button" className="uniform-status-btn selected-received" onClick={() => chooseUniformStatus('received')}>
+                    ✅ Received
                   </button>
-                ))}
+                  <button type="button" className="uniform-status-btn selected-not_received" onClick={() => chooseUniformStatus('not_received')}>
+                    ❌ Not Received
+                  </button>
+                  <button type="button" className="uniform-status-btn selected-pending" onClick={() => chooseUniformStatus('pending')}>
+                    ⏳ Pending
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Notes (optional)</label>
-              <input type="text" className="form-control" value={uniformNotes}
-                onChange={e => setUniformNotes(e.target.value)} placeholder="e.g. Size L, given on 25 Aug" />
-            </div>
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button className="btn btn-primary" onClick={handleUniformSubmit} disabled={uniformLoading} style={{ flex: 1 }}>
-                {uniformLoading ? '⏳ Saving...' : '✓ Save Status'}
-              </button>
-              <button className="btn btn-secondary" onClick={() => setShowUniformModal(false)}>Cancel</button>
-            </div>
+            )}
+
+            {uniformStep === 'sets' && (
+              <div>
+                <label className="form-label" style={{ marginBottom: 12 }}>How many uniform sets?</label>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  {([1, 2] as const).map(count => (
+                    <button
+                      key={count}
+                      type="button"
+                      className={`uniform-set-option ${uniformSetCount === count ? 'selected' : ''}`}
+                      onClick={() => chooseUniformSets(count)}
+                    >
+                      <strong>{count}</strong>
+                      <span>{count === 1 ? 'Set' : 'Sets'}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {uniformStep === 'payment' && (
+              <form onSubmit={e => { e.preventDefault(); handleUniformPaymentSubmit(); }}>
+                <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
+                  <strong style={{ color: 'var(--teal)' }}>✅ {uniformSetCount} uniform set{uniformSetCount > 1 ? 's' : ''} selected</strong>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Manual Payment Amount ₹ *</label>
+                  <input
+                    type="number"
+                    className="form-control"
+                    value={uniformPayment}
+                    onChange={e => setUniformPayment(e.target.value)}
+                    min={0.01}
+                    step="0.01"
+                    placeholder="Enter amount"
+                    required
+                    autoFocus
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Payment Date</label>
+                  <input type="date" className="form-control" value={uniformPaymentDate} onChange={e => setUniformPaymentDate(e.target.value)} />
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button type="submit" className="btn btn-primary" disabled={uniformLoading} style={{ flex: 1 }}>
+                    {uniformLoading ? '⏳ Saving...' : '✓ Save Payment'}
+                  </button>
+                  <button type="button" className="btn btn-secondary" onClick={() => setUniformStep('sets')}>Back</button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

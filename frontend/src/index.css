@@ -912,6 +912,19 @@ table.report-table tr:last-child td { border-bottom:0; }
 }
 
 
+
+/* Compact report columns */
+.report-course-cell { display:flex; flex-direction:column; gap:3px; line-height:1.2; }
+.report-course-cell strong { color:var(--text-primary); font-size:12px; }
+.report-course-cell span { color:var(--accent); font-size:10px; font-weight:700; }
+.course-report-table, .enrollment-report-table, .hostel-report-table, .exam-report-page-table { min-width:0 !important; }
+
+/* Exam Fee Get Report modal: dark ERP screen theme */
+.exam-report-modal { background:var(--bg-card) !important; color:var(--text-primary) !important; border:1px solid var(--border-light); }
+.exam-report-modal-title { margin:0; font-size:22px; font-weight:800; color:var(--text-primary); }
+.exam-report-modal-subtitle { margin:5px 0 0; font-size:12px; color:var(--text-secondary); }
+.exam-report-modal .exam-report-summary-card { background:linear-gradient(135deg,rgba(30,41,59,.92),rgba(24,35,54,.92)) !important; border:1px solid var(--border-light) !important; color:var(--text-primary) !important; }
+
 /* Exam Fee Get Report: match the same dark report theme */
 .exam-report-summary-card { border:1px solid var(--border-light); border-radius:10px; padding:13px 15px; background:linear-gradient(135deg,rgba(30,41,59,.92),rgba(24,35,54,.92)); color:var(--text-primary); }
 .exam-report-summary-label { font-size:10px; font-weight:800; color:var(--text-secondary); letter-spacing:.5px; }
@@ -943,3 +956,35 @@ table.exam-report-table td.total-cell.balance.due { color:var(--red); }
   table.exam-report-table td.paid, table.exam-report-table td.total-cell.paid { color:#078a69 !important; }
   table.exam-report-table td.balance.due, table.exam-report-table td.total-cell.balance.due { color:#c0392b !important; }
 }
+
+/* ── Uniform report / set selector ───────────────────────────────────── */
+.uniform-set-option {
+  flex: 1;
+  min-height: 86px;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all .15s ease;
+}
+.uniform-set-option strong { font-size: 26px; color: var(--text-primary); }
+.uniform-set-option span { font-size: 12px; }
+.uniform-set-option:hover,
+.uniform-set-option.selected {
+  border-color: var(--accent);
+  background: rgba(99,102,241,.10);
+  color: var(--accent);
+}
+.uniform-set-option.selected strong { color: var(--accent); }
+.uniform-report-table { min-width: 1180px !important; }
+.uniform-report-pill { display:inline-flex; align-items:center; padding:4px 9px; border-radius:999px; font-size:11px; font-weight:700; }
+.uniform-report-pill.received { color:var(--teal); background:rgba(16,185,129,.12); }
+.uniform-report-pill.not-received { color:var(--text-secondary); background:rgba(148,163,184,.10); }
+.uniform-report-summary { grid-template-columns:repeat(6,minmax(0,1fr)); }
+@media (max-width:1100px) { .uniform-report-summary { grid-template-columns:repeat(3,minmax(0,1fr)); } }

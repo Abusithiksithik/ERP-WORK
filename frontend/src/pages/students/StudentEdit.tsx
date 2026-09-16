@@ -35,6 +35,10 @@ const StudentEdit: React.FC = () => {
   const consentVideoRef = useRef<HTMLInputElement>(null);
 
   const [loading, setLoading]         = useState(false);
+  const [showUniformSetup, setShowUniformSetup] = useState(false);
+  const [uniformSetupStep, setUniformSetupStep] = useState<'sets' | 'payment'>('sets');
+  const [uniformSetCount, setUniformSetCount] = useState<1 | 2>(1);
+  const [uniformPayment, setUniformPayment] = useState('');
   const [pageLoading, setPageLoading] = useState(true);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [form, setForm] = useState<any>({});
@@ -234,6 +238,14 @@ const StudentEdit: React.FC = () => {
         }
       }
 
+      if ((form as any).uniform_received && uniformPayment && Number(uniformPayment) > 0) {
+        await api.post(`/student-materials/uniform/${id}/receive`, {
+          set_count: uniformSetCount,
+          amount: Number(uniformPayment),
+          payment_date: form.admission_date,
+        });
+      }
+
       // Upload new consent files if changed
       if (consentImageFile) {
         const cfd = new FormData(); cfd.append('file', consentImageFile);
@@ -420,7 +432,13 @@ const StudentEdit: React.FC = () => {
             transition: 'all 0.2s',
           }}>
             <input type="checkbox" checked={!!form.uniform_received}
-              onChange={e => setForm((f: any) => ({ ...f, uniform_received: e.target.checked }))}
+              onChange={e => {
+                if (e.target.checked) {
+                  setUniformSetCount(1); setUniformPayment(''); setUniformSetupStep('sets'); setShowUniformSetup(true);
+                } else {
+                  setForm((f: any) => ({ ...f, uniform_received: false }));
+                }
+              }}
               style={{ width: 20, height: 20, accentColor: 'var(--teal)', cursor: 'pointer', flexShrink: 0 }} />
             <div>
               <div style={{ fontSize: 14, fontWeight: 700, color: form.uniform_received ? 'var(--teal)' : 'var(--text-primary)' }}>
@@ -627,6 +645,48 @@ const StudentEdit: React.FC = () => {
             Cancel
           </button>
         </div>
+        {/* Uniform setup modal */}
+        {showUniformSetup && (
+          <div className="modal-overlay">
+            <div className="modal" style={{ maxWidth: 430 }}>
+              <div className="modal-header">
+                <h2 className="modal-title">👕 Uniform</h2>
+                <button type="button" className="modal-close" onClick={() => setShowUniformSetup(false)}>×</button>
+              </div>
+              {uniformSetupStep === 'sets' ? (
+                <div>
+                  <label className="form-label" style={{ marginBottom: 12 }}>How many uniform sets?</label>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    {([1, 2] as const).map(count => (
+                      <button key={count} type="button" className={`uniform-set-option ${uniformSetCount === count ? 'selected' : ''}`} onClick={() => { setUniformSetCount(count); setUniformSetupStep('payment'); }}>
+                        <strong>{count}</strong><span>{count === 1 ? 'Set' : 'Sets'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
+                    <strong style={{ color: 'var(--teal)' }}>✅ {uniformSetCount} set{uniformSetCount > 1 ? 's' : ''} selected</strong>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Manual Payment Amount ₹ *</label>
+                    <input type="number" className="form-control" value={uniformPayment} onChange={e => setUniformPayment(e.target.value)} min={0.01} step="0.01" placeholder="Enter amount" autoFocus required />
+                  </div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={() => {
+                      if (Number(uniformPayment) <= 0) { toast.error('Enter a valid payment amount'); return; }
+                      setForm((f: any) => ({ ...f, uniform_received: true }));
+                      setShowUniformSetup(false);
+                    }}>✓ Save Uniform</button>
+                    <button type="button" className="btn btn-secondary" onClick={() => setUniformSetupStep('sets')}>Back</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
       </form>
     </div>
   );
