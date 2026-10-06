@@ -988,3 +988,42 @@ table.exam-report-table td.total-cell.balance.due { color:var(--red); }
 .uniform-report-pill.not-received { color:var(--text-secondary); background:rgba(148,163,184,.10); }
 .uniform-report-summary { grid-template-columns:repeat(6,minmax(0,1fr)); }
 @media (max-width:1100px) { .uniform-report-summary { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+
+/* Hostel fee period dates: always display DD/MM/YYYY while keeping the native calendar picker. */
+.hostel-date-field {
+  position: relative;
+  width: 100%;
+}
+.hostel-date-field .form-control {
+  padding-right: 44px;
+}
+.hostel-date-picker-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  z-index: 2;
+}
+.hostel-date-picker-btn:hover {
+  background: rgba(99,102,241,0.14);
+}
+.hostel-native-date-picker {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  width: 34px;
+  height: 34px;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+}

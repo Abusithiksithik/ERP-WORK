@@ -72,16 +72,25 @@ router.get('/hostel', async (_req: AuthRequest, res: Response) => {
         c.course_name,
         b.batch_name,
         TO_CHAR(s.admission_date, 'DD/MM/YYYY') AS admission_date,
-        COALESCE(hr.hostel_fee,0)::numeric AS hostel_fee,
-        COALESCE(hr.mess_fee,0)::numeric AS mess_fee,
-        (COALESCE(hr.hostel_fee,0)+COALESCE(hr.mess_fee,0))::numeric AS total_fee,
-        COALESCE(hr.discount,0)::numeric AS discount,
-        COALESCE(hr.paid_amount,0)::numeric AS amount_paid,
-        GREATEST(COALESCE(hr.hostel_fee,0)+COALESCE(hr.mess_fee,0)-COALESCE(hr.discount,0)-COALESCE(hr.paid_amount,0),0)::numeric AS balance_due
+        COALESCE(fp.hostel_fee,0)::numeric AS hostel_fee,
+        COALESCE(fp.mess_fee,0)::numeric AS mess_fee,
+        (COALESCE(fp.hostel_fee,0)+COALESCE(fp.mess_fee,0))::numeric AS total_fee,
+        COALESCE(fp.discount,0)::numeric AS discount,
+        COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp WHERE hp.period_id=fp.id),0)::numeric AS amount_paid,
+        GREATEST(
+          COALESCE(fp.hostel_fee,0)+COALESCE(fp.mess_fee,0)-COALESCE(fp.discount,0)
+          -COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp WHERE hp.period_id=fp.id),0),
+          0
+        )::numeric AS balance_due
       FROM hostel_records hr
       JOIN students s ON s.id=hr.student_id
       LEFT JOIN courses c ON c.id=s.course_id
       LEFT JOIN batches b ON b.id=s.batch_id
+      LEFT JOIN LATERAL (
+        SELECT hfp.* FROM hostel_fee_periods hfp
+        WHERE hfp.hostel_record_id=hr.id AND CURRENT_DATE BETWEEN hfp.start_date AND hfp.end_date
+        ORDER BY hfp.start_date DESC, hfp.id DESC LIMIT 1
+      ) fp ON TRUE
       WHERE s.status != 'discontinued'
       ORDER BY s.full_name ASC
     `);
@@ -129,13 +138,11 @@ router.get('/uniform', async (_req: AuthRequest, res: Response) => {
         b.batch_name,
         COALESCE(su.status, CASE WHEN s.uniform_received THEN 'received' ELSE 'not_received' END) AS uniform_status,
         COALESCE(su.set_count, 0)::integer AS set_count,
-        3000::numeric AS total_amount,
-        COALESCE((SELECT p.amount FROM payments p
-          WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'
-          ORDER BY p.created_at DESC, p.id DESC LIMIT 1),0)::numeric AS amount_paid,
-        GREATEST(3000 - COALESCE((SELECT p.amount FROM payments p
-          WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'
-          ORDER BY p.created_at DESC, p.id DESC LIMIT 1),0),0)::numeric AS balance_due
+        (COALESCE(su.set_count, 0) * 1500)::numeric AS total_amount,
+        COALESCE((SELECT SUM(p.amount) FROM payments p
+          WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'),0)::numeric AS amount_paid,
+        GREATEST((COALESCE(su.set_count, 0) * 1500) - COALESCE((SELECT SUM(p.amount) FROM payments p
+          WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'),0),0)::numeric AS balance_due
       FROM students s
       LEFT JOIN student_uniform su ON su.student_id=s.id
       LEFT JOIN courses c ON c.id=s.course_id

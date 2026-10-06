@@ -5,7 +5,7 @@ import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 const router = Router();
 router.use(authenticate);
 
-const UNIFORM_FEE = 3000;
+const UNIFORM_FEE_PER_SET = 1500;
 
 
 // ── GET /api/student-materials?student_id=X ────────────────────────────
@@ -88,7 +88,7 @@ router.get('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge',
        FROM student_uniform su
        LEFT JOIN users u ON u.id = su.updated_by
        WHERE su.student_id = $1`,
-      [req.params.student_id, UNIFORM_FEE]
+      [req.params.student_id, UNIFORM_FEE_PER_SET]
     );
     if (result.rows.length === 0) {
       // Return default pending status if not set
@@ -101,7 +101,7 @@ router.get('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge',
       );
       res.json({ success: true, data: {
         student_id: req.params.student_id, status: payment.rows.length ? 'received' : 'pending',
-        set_count: 0, notes: null, uniform_fee: UNIFORM_FEE,
+        set_count: 0, notes: null, uniform_fee: UNIFORM_FEE_PER_SET,
         payment_id: payment.rows[0]?.payment_id || null,
         payment_amount: payment.rows[0]?.payment_amount || 0,
       } });
@@ -160,8 +160,11 @@ router.put('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge')
 router.put('/uniform/:student_id/payment', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
   try {
     const amount = Number(req.body?.amount);
-    if (!Number.isFinite(amount) || amount <= 0 || amount > UNIFORM_FEE) {
-      res.status(400).json({ success: false, message: `Uniform payment must be between ₹1 and ₹${UNIFORM_FEE}` });
+    const uniformRow = await query('SELECT set_count, status FROM student_uniform WHERE student_id=$1', [req.params.student_id]);
+    const setCount = Number(uniformRow.rows[0]?.set_count || 0);
+    const maxAmount = Math.max(1, setCount * UNIFORM_FEE_PER_SET);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > maxAmount) {
+      res.status(400).json({ success: false, message: `Uniform payment must be between ₹1 and ₹${maxAmount}` });
       return;
     }
 
@@ -216,8 +219,9 @@ router.post('/uniform/:student_id/receive', authorize('super_admin', 'admin', 'i
       res.status(400).json({ success: false, message: 'Select 1 or 2 uniform sets' });
       return;
     }
-    if (!Number.isFinite(payAmount) || payAmount <= 0 || payAmount > UNIFORM_FEE) {
-      res.status(400).json({ success: false, message: `Uniform payment must be between ₹1 and ₹${UNIFORM_FEE}` });
+    const maxAmount = setCount * UNIFORM_FEE_PER_SET;
+    if (!Number.isFinite(payAmount) || payAmount <= 0 || payAmount > maxAmount) {
+      res.status(400).json({ success: false, message: `Uniform payment must be between ₹1 and ₹${maxAmount}` });
       return;
     }
 

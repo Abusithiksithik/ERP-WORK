@@ -6,7 +6,7 @@ import { Link } from 'react-router-dom';
 import api from '../../api/axios';
 import { CourseCategory, Course, Batch } from '../../types';
 
-const UNIFORM_FEE = 3000;
+const UNIFORM_FEE_PER_SET = 1500;
 
 interface CertFile { file: File | null; preview: string | null; existingUrl?: string; }
 
@@ -251,8 +251,8 @@ const StudentEdit: React.FC = () => {
 
       if ((form as any).uniform_received && uniformPayment && Number(uniformPayment) > 0) {
         const amount = Number(uniformPayment);
-        if (amount > UNIFORM_FEE) {
-          toast.error(`Uniform payment cannot exceed ₹${UNIFORM_FEE}`);
+        if (amount > (Number(uniformSetCount) || 1) * UNIFORM_FEE_PER_SET) {
+          toast.error(`Uniform payment cannot exceed ₹${(Number(uniformSetCount) || 1) * UNIFORM_FEE_PER_SET}`);
           return;
         }
         await api.put(`/student-materials/uniform/${id}/payment`, { amount });
@@ -690,17 +690,17 @@ const StudentEdit: React.FC = () => {
                 <div>
                   <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
                     <strong style={{ color: 'var(--teal)' }}>✅ {uniformSetCount} set{uniformSetCount > 1 ? 's' : ''} selected</strong>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Fixed uniform fee: ₹{UNIFORM_FEE.toLocaleString('en-IN')}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Uniform fee: ₹{(uniformSetCount * UNIFORM_FEE_PER_SET).toLocaleString('en-IN')} ({UNIFORM_FEE_PER_SET.toLocaleString('en-IN')} / set)</div>
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Manual Payment Amount ₹ * <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(max ₹{UNIFORM_FEE.toLocaleString('en-IN')})</span></label>
-                    <input type="number" className="form-control" value={uniformPayment} onChange={e => setUniformPayment(e.target.value)} min={0.01} max={UNIFORM_FEE} step="0.01" placeholder="Enter amount" autoFocus required />
+                    <label className="form-label">Manual Payment Amount ₹ * <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(max ₹{(uniformSetCount * UNIFORM_FEE_PER_SET).toLocaleString('en-IN')})</span></label>
+                    <input type="number" className="form-control" value={uniformPayment} onChange={e => setUniformPayment(e.target.value)} min={0.01} max={uniformSetCount * UNIFORM_FEE_PER_SET} step="0.01" placeholder="Enter amount" autoFocus required />
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>
                     <button type="button" className="btn btn-primary" style={{ flex: 1 }} onClick={async () => {
                       const amount = Number(uniformPayment);
                       if (!Number.isFinite(amount) || amount <= 0) { toast.error('Enter a valid payment amount'); return; }
-                      if (amount > UNIFORM_FEE) { toast.error(`Uniform payment cannot exceed ₹${UNIFORM_FEE}`); return; }
+                      if (amount > (Number(uniformSetCount) || 1) * UNIFORM_FEE_PER_SET) { toast.error(`Uniform payment cannot exceed ₹${(Number(uniformSetCount) || 1) * UNIFORM_FEE_PER_SET}`); return; }
                       try {
                         await api.put(`/student-materials/uniform/${id}/payment`, { amount });
                         await api.put(`/student-materials/uniform/${id}`, { status: 'received', set_count: uniformSetCount });

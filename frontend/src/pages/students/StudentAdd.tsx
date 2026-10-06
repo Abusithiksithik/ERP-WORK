@@ -5,7 +5,7 @@ import { FiUpload, FiFileText, FiUser, FiChevronDown, FiImage, FiAlertCircle, Fi
 import api from '../../api/axios';
 import { CourseCategory, Course, Batch } from '../../types';
 
-const UNIFORM_FEE = 3000;
+const UNIFORM_FEE_PER_SET = 1500;
 
 interface CertFile { file: File | null; preview: string | null; }
 
@@ -176,8 +176,8 @@ const StudentAdd: React.FC = () => {
     if (!selectedCourse)        { toast.error('Please select a Sub-Course'); return; }
     if (!isFree && !selectedBatch) { toast.error('Batch Year is required for paid courses'); return; }
     if (initPayAmt > courseFee)    { toast.error('Initial payment cannot exceed course fee'); return; }
-    if (form.uniform_received && Number(form.uniform_payment) > UNIFORM_FEE) {
-      toast.error(`Uniform payment cannot exceed ₹${UNIFORM_FEE}`);
+    if (form.uniform_received && Number(form.uniform_payment) > (Number(form.uniform_set_count) || 1) * UNIFORM_FEE_PER_SET) {
+      toast.error(`Uniform payment cannot exceed ₹${(Number(form.uniform_set_count) || 1) * UNIFORM_FEE_PER_SET}`);
       return;
     }
 
@@ -810,11 +810,11 @@ const StudentAdd: React.FC = () => {
                 <div>
                   <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
                     <strong style={{ color: 'var(--teal)' }}>✅ {uniformSetCount} set{uniformSetCount > 1 ? 's' : ''} selected</strong>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Fixed uniform fee: ₹{UNIFORM_FEE.toLocaleString('en-IN')}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Uniform fee: ₹{(uniformSetCount * UNIFORM_FEE_PER_SET).toLocaleString('en-IN')} ({UNIFORM_FEE_PER_SET.toLocaleString('en-IN')} / set)</div>
                   </div>
                   <div className="form-group">
-                    <label className="form-label">Manual Payment Amount ₹ * <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(max ₹{UNIFORM_FEE.toLocaleString('en-IN')})</span></label>
-                    <input id="add-uniform-payment" type="number" className="form-control" min={0.01} max={UNIFORM_FEE} step="0.01" placeholder="Enter amount" autoFocus required
+                    <label className="form-label">Manual Payment Amount ₹ * <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(max ₹{(uniformSetCount * UNIFORM_FEE_PER_SET).toLocaleString('en-IN')})</span></label>
+                    <input id="add-uniform-payment" type="number" className="form-control" min={0.01} max={uniformSetCount * UNIFORM_FEE_PER_SET} step="0.01" placeholder="Enter amount" autoFocus required
                       onChange={e => setForm(f => ({ ...f, uniform_payment: e.target.value }))} />
                   </div>
                   <div style={{ display: 'flex', gap: 10 }}>

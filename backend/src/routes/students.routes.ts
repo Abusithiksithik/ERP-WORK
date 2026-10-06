@@ -192,14 +192,20 @@ router.get('/:id/discontinue-details', authorize('super_admin', 'admin'), async 
     const hostelRes = await query(
       `SELECT
          hr.id AS hostel_record_id,
-         (COALESCE(hr.hostel_fee,0) + COALESCE(hr.mess_fee,0))::numeric AS total_fee,
-         COALESCE(hr.discount,0)::numeric AS discount,
-         COALESCE(hr.paid_amount,0)::numeric AS paid_amount,
+         (COALESCE(fp.hostel_fee,0) + COALESCE(fp.mess_fee,0))::numeric AS total_fee,
+         COALESCE(fp.discount,0)::numeric AS discount,
+         COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp WHERE hp.period_id=fp.id),0)::numeric AS paid_amount,
          GREATEST(
-           COALESCE(hr.hostel_fee,0) + COALESCE(hr.mess_fee,0)
-           - COALESCE(hr.discount,0) - COALESCE(hr.paid_amount,0), 0
+           COALESCE(fp.hostel_fee,0) + COALESCE(fp.mess_fee,0)
+           - COALESCE(fp.discount,0)
+           - COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp WHERE hp.period_id=fp.id),0), 0
          )::numeric AS pending_balance
        FROM hostel_records hr
+       LEFT JOIN LATERAL (
+         SELECT hfp.* FROM hostel_fee_periods hfp
+         WHERE hfp.hostel_record_id=hr.id AND CURRENT_DATE BETWEEN hfp.start_date AND hfp.end_date
+         ORDER BY hfp.start_date DESC, hfp.id DESC LIMIT 1
+       ) fp ON TRUE
        WHERE hr.student_id=$1
        LIMIT 1`, [id]
     );
