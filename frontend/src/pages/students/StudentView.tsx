@@ -10,6 +10,10 @@ import api from '../../api/axios';
 import { Student, Enrollment, Payment } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 
+const UNIFORM_FEES = { '1st Year': 1400, '2nd Year': 1000 } as const;
+type UniformYear = keyof typeof UNIFORM_FEES;
+const uniformFee = (year: UniformYear, sets: number) => UNIFORM_FEES[year] * sets;
+
 const fmt = (n: number | string) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const fmtDate = (d: string) => {
   try {
@@ -33,8 +37,11 @@ interface StudentMaterial {
 interface UniformStatus {
   student_id: number | string;
   status: 'received' | 'not_received' | 'pending';
+  uniform_year?: '1st Year' | '2nd Year' | null;
   set_count?: number;
   notes?: string;
+  uniform_fee?: number;
+  payment_amount?: number;
 }
 
 const StudentView: React.FC = () => {
@@ -57,10 +64,11 @@ const StudentView: React.FC = () => {
   // Uniform modal
   const [showUniformModal, setShowUniformModal]   = useState(false);
   const [uniformStatus, setUniformStatus]         = useState<'received' | 'not_received' | 'pending'>('pending');
+  const [uniformYear, setUniformYear] = useState<UniformYear>('1st Year');
   const [uniformSetCount, setUniformSetCount]     = useState<1 | 2>(1);
   const [uniformPayment, setUniformPayment]       = useState('');
   const [uniformPaymentDate, setUniformPaymentDate] = useState(new Date().toISOString().split('T')[0]);
-  const [uniformStep, setUniformStep]             = useState<'status' | 'sets' | 'payment'>('status');
+  const [uniformStep, setUniformStep]             = useState<'status' | 'year' | 'sets' | 'payment'>('status');
   const [uniformLoading, setUniformLoading]       = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -150,14 +158,11 @@ const StudentView: React.FC = () => {
   };
 
   const handleUniformPaymentSubmit = async () => {
-    const amount = Number(uniformPayment);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      toast.error('Enter a valid payment amount');
-      return;
-    }
+    const amount = uniformFee(uniformYear, uniformSetCount);
     setUniformLoading(true);
     try {
       await api.post(`/student-materials/uniform/${id}/receive`, {
+        uniform_year: uniformYear,
         set_count: uniformSetCount,
         amount,
         payment_date: uniformPaymentDate,
@@ -174,6 +179,7 @@ const StudentView: React.FC = () => {
 
   const openUniformModal = () => {
     setUniformStatus(uniform?.status || 'pending');
+    setUniformYear(uniform?.uniform_year === '2nd Year' ? '2nd Year' : '1st Year');
     setUniformSetCount(uniform?.set_count === 2 ? 2 : 1);
     setUniformPayment('');
     setUniformPaymentDate(new Date().toISOString().split('T')[0]);
@@ -183,12 +189,13 @@ const StudentView: React.FC = () => {
 
   const chooseUniformStatus = (status: 'received' | 'not_received' | 'pending') => {
     setUniformStatus(status);
-    if (status === 'received') setUniformStep('sets');
+    if (status === 'received') setUniformStep('year');
     else handleUniformSimpleStatus(status);
   };
 
   const chooseUniformSets = (count: 1 | 2) => {
     setUniformSetCount(count);
+    setUniformPayment(String(uniformFee(uniformYear, count)));
     setUniformStep('payment');
   };
 
@@ -663,43 +670,43 @@ const StudentView: React.FC = () => {
               </div>
             )}
 
-            {uniformStep === 'sets' && (
+            {uniformStep === 'year' && (
               <div>
-                <label className="form-label" style={{ marginBottom: 12 }}>How many uniform sets?</label>
+                <label className="form-label" style={{ marginBottom: 12 }}>Select Uniform Year</label>
                 <div style={{ display: 'flex', gap: 12 }}>
-                  {([1, 2] as const).map(count => (
-                    <button
-                      key={count}
-                      type="button"
-                      className={`uniform-set-option ${uniformSetCount === count ? 'selected' : ''}`}
-                      onClick={() => chooseUniformSets(count)}
-                    >
-                      <strong>{count}</strong>
-                      <span>{count === 1 ? 'Set' : 'Sets'}</span>
+                  {(['1st Year', '2nd Year'] as UniformYear[]).map(year => (
+                    <button key={year} type="button" className="uniform-set-option" onClick={() => { setUniformYear(year); setUniformStep('sets'); }}>
+                      <strong>{year === '1st Year' ? '1st' : '2nd'}</strong><span>{year}</span>
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
+            {uniformStep === 'sets' && (
+              <div>
+                <div style={{ marginBottom: 12, color: 'var(--text-muted)', fontSize: 12 }}>{uniformYear} · ₹{UNIFORM_FEES[uniformYear].toLocaleString('en-IN')} / set</div>
+                <label className="form-label" style={{ marginBottom: 12 }}>How many uniform sets?</label>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  {([1, 2] as const).map(count => (
+                    <button key={count} type="button" className="uniform-set-option" onClick={() => chooseUniformSets(count)}>
+                      <strong>{count}</strong><span>{count === 1 ? 'Set' : 'Sets'}</span><small style={{ display: 'block', marginTop: 4 }}>₹{uniformFee(uniformYear, count).toLocaleString('en-IN')}</small>
+                    </button>
+                  ))}
+                </div>
+                <button type="button" className="btn btn-secondary" style={{ marginTop: 12 }} onClick={() => setUniformStep('year')}>Back</button>
+              </div>
+            )}
+
             {uniformStep === 'payment' && (
               <form onSubmit={e => { e.preventDefault(); handleUniformPaymentSubmit(); }}>
                 <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.25)' }}>
-                  <strong style={{ color: 'var(--teal)' }}>✅ {uniformSetCount} uniform set{uniformSetCount > 1 ? 's' : ''} selected</strong>
+                  <strong style={{ color: 'var(--teal)' }}>{uniformYear} · {uniformSetCount} set{uniformSetCount > 1 ? 's' : ''}</strong>
+                  <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 4 }}>Total Uniform Fee: ₹{uniformFee(uniformYear, uniformSetCount).toLocaleString('en-IN')}</div>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Manual Payment Amount ₹ *</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={uniformPayment}
-                    onChange={e => setUniformPayment(e.target.value)}
-                    min={0.01}
-                    step="0.01"
-                    placeholder="Enter amount"
-                    required
-                    autoFocus
-                  />
+                  <label className="form-label">Payment Amount</label>
+                  <input type="text" className="form-control" value={`₹${uniformFee(uniformYear, uniformSetCount).toLocaleString('en-IN')}`} readOnly />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Payment Date</label>
@@ -707,7 +714,7 @@ const StudentView: React.FC = () => {
                 </div>
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button type="submit" className="btn btn-primary" disabled={uniformLoading} style={{ flex: 1 }}>
-                    {uniformLoading ? '⏳ Saving...' : '✓ Save Payment'}
+                    {uniformLoading ? '⏳ Saving...' : `✓ Confirm Payment ₹${uniformFee(uniformYear, uniformSetCount).toLocaleString('en-IN')}`}
                   </button>
                   <button type="button" className="btn btn-secondary" onClick={() => setUniformStep('sets')}>Back</button>
                 </div>

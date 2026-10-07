@@ -5,7 +5,9 @@ import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 const router = Router();
 router.use(authenticate);
 
-const UNIFORM_FEE_PER_SET = 1500;
+const UNIFORM_FEES = { '1st Year': 1400, '2nd Year': 1000 } as const;
+type UniformYear = keyof typeof UNIFORM_FEES;
+const getUniformFeePerSet = (year: unknown) => year === '2nd Year' ? UNIFORM_FEES['2nd Year'] : year === '1st Year' ? UNIFORM_FEES['1st Year'] : 0;
 
 
 // ── GET /api/student-materials?student_id=X ────────────────────────────
@@ -74,7 +76,7 @@ router.get('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge',
   try {
     const result = await query(
       `SELECT su.*, u.full_name AS updated_by_name,
-              $2::numeric AS uniform_fee,
+              CASE su.uniform_year WHEN '1st Year' THEN $2::numeric WHEN '2nd Year' THEN $3::numeric ELSE 0 END AS uniform_fee,
               (SELECT p.id FROM payments p
                WHERE p.student_id = su.student_id
                  AND p.payment_type = 'uniform'
@@ -88,7 +90,7 @@ router.get('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge',
        FROM student_uniform su
        LEFT JOIN users u ON u.id = su.updated_by
        WHERE su.student_id = $1`,
-      [req.params.student_id, UNIFORM_FEE_PER_SET]
+      [req.params.student_id, UNIFORM_FEES['1st Year'], UNIFORM_FEES['2nd Year']]
     );
     if (result.rows.length === 0) {
       // Return default pending status if not set
@@ -101,7 +103,7 @@ router.get('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge',
       );
       res.json({ success: true, data: {
         student_id: req.params.student_id, status: payment.rows.length ? 'received' : 'pending',
-        set_count: 0, notes: null, uniform_fee: UNIFORM_FEE_PER_SET,
+        set_count: 0, uniform_year: null, notes: null, uniform_fee: 0,
         payment_id: payment.rows[0]?.payment_id || null,
         payment_amount: payment.rows[0]?.payment_amount || 0,
       } });
@@ -117,13 +119,18 @@ router.get('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge',
 // ── PUT /api/student-materials/uniform/:student_id ─────────────────────
 router.put('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
   try {
-    const { status, notes, set_count } = req.body;
+    const { status, notes, set_count, uniform_year } = req.body;
     const validStatuses = ['received', 'not_received', 'pending'];
     if (!status || !validStatuses.includes(status)) {
       res.status(400).json({ success: false, message: `Status must be one of: ${validStatuses.join(', ')}` });
       return;
     }
     const setCount = status === 'received' ? Number(set_count) : 0;
+    const year = status === 'received' ? String(uniform_year || '') : '';
+    if (status === 'received' && !['1st Year', '2nd Year'].includes(year)) {
+      res.status(400).json({ success: false, message: 'Select 1st Year or 2nd Year' });
+      return;
+    }
     if (status === 'received' && ![1, 2].includes(setCount)) {
       res.status(400).json({ success: false, message: 'Select 1 or 2 uniform sets' });
       return;
@@ -131,16 +138,17 @@ router.put('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge')
 
     // Update student_uniform table
     const result = await query(
-      `INSERT INTO student_uniform (student_id, status, set_count, notes, updated_by, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())
+      `INSERT INTO student_uniform (student_id, status, uniform_year, set_count, notes, updated_by, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW())
        ON CONFLICT (student_id) DO UPDATE
          SET status = EXCLUDED.status,
-             set_count = EXCLUDED.set_count,
+             uniform_year = CASE WHEN EXCLUDED.status = 'received' THEN EXCLUDED.uniform_year ELSE student_uniform.uniform_year END,
+             set_count = CASE WHEN EXCLUDED.status = 'received' THEN EXCLUDED.set_count ELSE student_uniform.set_count END,
              notes  = EXCLUDED.notes,
              updated_by = EXCLUDED.updated_by,
              updated_at = NOW()
        RETURNING *`,
-      [req.params.student_id, status, setCount, notes || null, req.user!.id]
+      [req.params.student_id, status, year, setCount, notes || null, req.user!.id]
     );
     // Sync to students.uniform_received (single source of truth)
     await query(
@@ -156,13 +164,14 @@ router.put('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge')
 });
 
 // ── PUT /api/student-materials/uniform/:student_id/payment ─────────────
-// Update the single current uniform payment amount (maximum ₹3,000).
+// Update the current uniform payment amount using the selected year/set price.
 router.put('/uniform/:student_id/payment', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
   try {
     const amount = Number(req.body?.amount);
-    const uniformRow = await query('SELECT set_count, status FROM student_uniform WHERE student_id=$1', [req.params.student_id]);
+    const uniformRow = await query('SELECT uniform_year, set_count, status FROM student_uniform WHERE student_id=$1', [req.params.student_id]);
+    const year = uniformRow.rows[0]?.uniform_year as UniformYear | null;
     const setCount = Number(uniformRow.rows[0]?.set_count || 0);
-    const maxAmount = Math.max(1, setCount * UNIFORM_FEE_PER_SET);
+    const maxAmount = setCount * getUniformFeePerSet(year);
     if (!Number.isFinite(amount) || amount <= 0 || amount > maxAmount) {
       res.status(400).json({ success: false, message: `Uniform payment must be between ₹1 and ₹${maxAmount}` });
       return;
@@ -212,14 +221,19 @@ router.put('/uniform/:student_id/payment', authorize('super_admin', 'admin', 'in
 router.post('/uniform/:student_id/receive', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
   try {
-    const { set_count, amount, payment_date, notes } = req.body;
+    const { uniform_year, set_count, amount, payment_date, notes } = req.body;
+    const year = String(uniform_year || '') as UniformYear;
     const setCount = Number(set_count);
     const payAmount = Number(amount);
+    if (!['1st Year', '2nd Year'].includes(year)) {
+      res.status(400).json({ success: false, message: 'Select 1st Year or 2nd Year' });
+      return;
+    }
     if (![1, 2].includes(setCount)) {
       res.status(400).json({ success: false, message: 'Select 1 or 2 uniform sets' });
       return;
     }
-    const maxAmount = setCount * UNIFORM_FEE_PER_SET;
+    const maxAmount = setCount * getUniformFeePerSet(year);
     if (!Number.isFinite(payAmount) || payAmount <= 0 || payAmount > maxAmount) {
       res.status(400).json({ success: false, message: `Uniform payment must be between ₹1 and ₹${maxAmount}` });
       return;
@@ -234,13 +248,13 @@ router.post('/uniform/:student_id/receive', authorize('super_admin', 'admin', 'i
     }
 
     const uniform = await client.query(
-      `INSERT INTO student_uniform (student_id, status, set_count, notes, updated_by, updated_at)
-       VALUES ($1, 'received', $2, $3, $4, NOW())
+      `INSERT INTO student_uniform (student_id, status, uniform_year, set_count, notes, updated_by, updated_at)
+       VALUES ($1, 'received', $2, $3, $4, $5, NOW())
        ON CONFLICT (student_id) DO UPDATE
-         SET status='received', set_count=EXCLUDED.set_count, notes=EXCLUDED.notes,
+         SET status='received', uniform_year=EXCLUDED.uniform_year, set_count=EXCLUDED.set_count, notes=EXCLUDED.notes,
              updated_by=EXCLUDED.updated_by, updated_at=NOW()
        RETURNING *`,
-      [req.params.student_id, setCount, notes || null, req.user!.id]
+      [req.params.student_id, year, setCount, notes || null, req.user!.id]
     );
 
     await client.query(

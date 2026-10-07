@@ -137,11 +137,13 @@ router.get('/uniform', async (_req: AuthRequest, res: Response) => {
         c.course_name,
         b.batch_name,
         COALESCE(su.status, CASE WHEN s.uniform_received THEN 'received' ELSE 'not_received' END) AS uniform_status,
+        su.uniform_year,
         COALESCE(su.set_count, 0)::integer AS set_count,
-        (COALESCE(su.set_count, 0) * 1500)::numeric AS total_amount,
+        CASE su.uniform_year WHEN '1st Year' THEN 1400 WHEN '2nd Year' THEN 1000 ELSE 0 END::numeric AS price_per_set,
+        (COALESCE(su.set_count, 0) * CASE su.uniform_year WHEN '1st Year' THEN 1400 WHEN '2nd Year' THEN 1000 ELSE 0 END)::numeric AS total_amount,
         COALESCE((SELECT SUM(p.amount) FROM payments p
           WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'),0)::numeric AS amount_paid,
-        GREATEST((COALESCE(su.set_count, 0) * 1500) - COALESCE((SELECT SUM(p.amount) FROM payments p
+        GREATEST((COALESCE(su.set_count, 0) * CASE su.uniform_year WHEN '1st Year' THEN 1400 WHEN '2nd Year' THEN 1000 ELSE 0 END) - COALESCE((SELECT SUM(p.amount) FROM payments p
           WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'),0),0)::numeric AS balance_due
       FROM students s
       LEFT JOIN student_uniform su ON su.student_id=s.id

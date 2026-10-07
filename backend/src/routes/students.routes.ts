@@ -811,8 +811,8 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
 
     // Sync uniform status to student_uniform table for cross-page sync
     await query(
-      `INSERT INTO student_uniform (student_id, status, updated_by, updated_at)
-       VALUES ($1, $2, $3, NOW())
+      `INSERT INTO student_uniform (student_id, status, uniform_year, set_count, updated_by, updated_at)
+       VALUES ($1, $2, NULL, 0, $3, NOW())
        ON CONFLICT (student_id) DO UPDATE
          SET status = EXCLUDED.status,
              updated_by = EXCLUDED.updated_by,

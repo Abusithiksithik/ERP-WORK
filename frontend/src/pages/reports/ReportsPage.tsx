@@ -63,20 +63,19 @@ const ExamTable = ({ rows }: { rows: any[] }) => (
 
 const UniformTable = ({ rows }: { rows: any[] }) => (
   <table className="report-table uniform-report-table"><thead><tr>
-    {['#', 'Student Name', 'Student ID', 'Course', 'Batch', 'Took Uniform?', 'No. of Sets', 'Price / Set', 'Total Amount', 'Amount Paid', 'Balance', 'Status', 'Progress'].map(h => <th key={h}>{h}</th>)}
+    {['#', 'Student Name', 'Student ID', 'Course', 'Batch', 'Year', 'Took Uniform?', 'No. of Sets', 'Price / Set', 'Total Amount', 'Amount Paid', 'Balance', 'Status'].map(h => <th key={h}>{h}</th>)}
   </tr></thead><tbody>{rows.map((r, i) => {
     const sets = Number(r.set_count || 0);
-    const total = Number(r.total_amount || (sets * 1500));
+    const total = Number(r.total_amount || 0);
     const paid = Number(r.amount_paid || 0);
-    const price = sets > 0 ? total / sets : 0;
+    const price = Number(r.price_per_set || 0);
     const received = r.uniform_status === 'received';
-    const progress = received ? 100 : 0;
     return <tr key={`${r.student_code}-${i}`}>
-      <td>{i + 1}</td><td>{r.full_name}</td><td>{r.student_code}</td><td>{r.course_name || '—'}</td><td>{r.batch_name || '—'}</td>
+      <td>{i + 1}</td><td>{r.full_name}</td><td>{r.student_code}</td><td>{r.course_name || '—'}</td><td>{r.batch_name || '—'}</td><td>{r.uniform_year || '—'}</td>
       <td><span className={`uniform-report-pill ${received ? 'received' : 'not-received'}`}>{received ? '✓ Yes' : '— No'}</span></td>
       <td>{sets || '—'}</td><td>{price ? money(price) : '—'}</td><td>{total ? money(total) : '—'}</td><td>{paid ? money(paid) : '—'}</td>
       <td>{money(Math.max(0, Number(r.balance_due || 0)))}</td>
-      <td>{received ? 'Received' : 'Not Received'}</td><td>{progress}%</td>
+      <td>{received ? 'Received' : 'Not Received'}</td>
     </tr>;
   })}</tbody></table>
 );
@@ -130,10 +129,10 @@ const ReportsPage: React.FC = () => {
       header = ['#', 'Student ID', 'Student Name', 'Course', 'Batch', 'Total Exam Fee', 'Discount', 'Paid', 'Balance'];
       data = rows.map((r, i) => [i + 1, r.student_code, r.full_name, r.course_name || '', r.batch_name || '', Number(r.exam_fee || 0), Number(r.discount || 0), Number(r.amount_paid || 0), Number(r.balance_due || 0)]);
     } else {
-      header = ['#', 'Student Name', 'Student ID', 'Course', 'Batch', 'Took Uniform?', 'No. of Sets', 'Price / Set', 'Total Amount', 'Amount Paid', 'Balance', 'Status', 'Progress'];
+      header = ['#', 'Student Name', 'Student ID', 'Course', 'Batch', 'Year', 'Took Uniform?', 'No. of Sets', 'Price / Set', 'Total Amount', 'Amount Paid', 'Balance', 'Status'];
       data = rows.map((r, i) => {
-        const sets = Number(r.set_count || 0), total = Number(r.total_amount || (sets * 1500)), received = r.uniform_status === 'received';
-        return [i + 1, r.full_name, r.student_code, r.course_name || '', r.batch_name || '', received ? 'Yes' : 'No', sets, sets ? total / sets : 0, total, Number(r.amount_paid || 0), Number(r.balance_due || 0), received ? 'Received' : 'Not Received', received ? '100%' : '0%'];
+        const sets = Number(r.set_count || 0), total = Number(r.total_amount || 0), received = r.uniform_status === 'received';
+        return [i + 1, r.full_name, r.student_code, r.course_name || '', r.batch_name || '', r.uniform_year || '', received ? 'Yes' : 'No', sets, Number(r.price_per_set || 0), total, Number(r.amount_paid || 0), Number(r.balance_due || 0), received ? 'Received' : 'Not Received'];
       });
     }
     const lines = [header, ...data].map(row => row.map(esc).join(','));

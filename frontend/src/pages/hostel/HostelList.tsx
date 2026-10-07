@@ -101,9 +101,9 @@ const DateField: React.FC<DateFieldProps> = ({ value, onChange, min, max, requir
     if (!picker) return;
     try {
       if ('showPicker' in picker) (picker as HTMLInputElement & { showPicker?: () => void }).showPicker?.();
-      else picker.click();
+      else (picker as HTMLInputElement & { click: () => void }).click();
     } catch {
-      picker.click();
+      (picker as HTMLInputElement & { click: () => void }).click();
     }
   };
 
