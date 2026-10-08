@@ -102,7 +102,7 @@ router.get('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge',
         [req.params.student_id]
       );
       res.json({ success: true, data: {
-        student_id: req.params.student_id, status: payment.rows.length ? 'received' : 'pending',
+        student_id: req.params.student_id, status: payment.rows.length ? 'received' : 'not_received',
         set_count: 0, uniform_year: null, notes: null, uniform_fee: 0,
         payment_id: payment.rows[0]?.payment_id || null,
         payment_amount: payment.rows[0]?.payment_amount || 0,
@@ -116,53 +116,9 @@ router.get('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge',
   }
 });
 
-// ── PUT /api/student-materials/uniform/:student_id ─────────────────────
-router.put('/uniform/:student_id', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
-  try {
-    const { status, notes, set_count, uniform_year } = req.body;
-    const validStatuses = ['received', 'not_received', 'pending'];
-    if (!status || !validStatuses.includes(status)) {
-      res.status(400).json({ success: false, message: `Status must be one of: ${validStatuses.join(', ')}` });
-      return;
-    }
-    const setCount = status === 'received' ? Number(set_count) : 0;
-    const year = status === 'received' ? String(uniform_year || '') : '';
-    if (status === 'received' && !['1st Year', '2nd Year'].includes(year)) {
-      res.status(400).json({ success: false, message: 'Select 1st Year or 2nd Year' });
-      return;
-    }
-    if (status === 'received' && ![1, 2].includes(setCount)) {
-      res.status(400).json({ success: false, message: 'Select 1 or 2 uniform sets' });
-      return;
-    }
-
-    // Update student_uniform table
-    const result = await query(
-      `INSERT INTO student_uniform (student_id, status, uniform_year, set_count, notes, updated_by, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW())
-       ON CONFLICT (student_id) DO UPDATE
-         SET status = EXCLUDED.status,
-             uniform_year = CASE WHEN EXCLUDED.status = 'received' THEN EXCLUDED.uniform_year ELSE student_uniform.uniform_year END,
-             set_count = CASE WHEN EXCLUDED.status = 'received' THEN EXCLUDED.set_count ELSE student_uniform.set_count END,
-             notes  = EXCLUDED.notes,
-             updated_by = EXCLUDED.updated_by,
-             updated_at = NOW()
-       RETURNING *`,
-      [req.params.student_id, status, year, setCount, notes || null, req.user!.id]
-    );
-    // Sync to students.uniform_received (single source of truth)
-    await query(
-      `UPDATE students SET uniform_received = $1 WHERE id = $2`,
-      [status === 'received', req.params.student_id]
-    ).catch(() => { /* non-critical */ });
-
-    res.json({ success: true, data: result.rows[0] });
-  } catch (err) {
-    console.error('PUT /student-materials/uniform error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
-
+// Uniform status is intentionally receive-only.
+// Pending / rejected / not-received workflow has been removed. A uniform record
+// exists only after the uniform is actually received.
 // ── PUT /api/student-materials/uniform/:student_id/payment ─────────────
 // Update the current uniform payment amount using the selected year/set price.
 router.put('/uniform/:student_id/payment', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {

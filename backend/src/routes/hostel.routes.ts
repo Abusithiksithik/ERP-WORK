@@ -11,6 +11,17 @@ const dateValue = (value: unknown): string | null => {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 };
 
+const monthPeriod = (value: unknown): { from: string; to: string } | null => {
+  const raw = String(value ?? '');
+  if (!/^\d{4}-\d{2}$/.test(raw)) return null;
+  const [year, month] = raw.split('-').map(Number);
+  const from = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const to = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return { from, to };
+};
+
+
 const ensurePeriod = async (
   hostelRecordId: number,
   studentId: number,
@@ -22,7 +33,9 @@ const ensurePeriod = async (
 ) => {
   const existing = await query(
     `SELECT * FROM hostel_fee_periods
-     WHERE hostel_record_id=$1 AND start_date=$2::date AND end_date=$3::date
+     WHERE hostel_record_id=$1
+       AND (start_date=$2::date AND end_date=$3::date
+            OR period_from=$2::date AND period_to=$3::date)
      ORDER BY id DESC LIMIT 1`,
     [hostelRecordId, periodFrom, periodTo]
   );
@@ -30,8 +43,14 @@ const ensurePeriod = async (
   if (existing.rows.length) {
     const result = await query(
       `UPDATE hostel_fee_periods
-       SET start_date=$1::date, end_date=$2::date,
-           hostel_fee=$3, mess_fee=$4, notes=$5, updated_at=NOW()
+       SET start_date=$1::date,
+           end_date=$2::date,
+           period_from=$1::date,
+           period_to=$2::date,
+           hostel_fee=$3,
+           mess_fee=$4,
+           notes=$5,
+           updated_at=NOW()
        WHERE id=$6
        RETURNING *`,
       [periodFrom, periodTo, hostelFee, messFee, notes, existing.rows[0].id]
@@ -41,8 +60,9 @@ const ensurePeriod = async (
 
   const result = await query(
     `INSERT INTO hostel_fee_periods
-       (hostel_record_id, student_id, start_date, end_date, hostel_fee, mess_fee, discount, notes)
-     VALUES ($1,$2,$3::date,$4::date,$5,$6,0,$7)
+       (hostel_record_id, student_id, period_from, period_to, start_date, end_date,
+        hostel_fee, mess_fee, discount, notes)
+     VALUES ($1,$2,$3::date,$4::date,$3::date,$4::date,$5,$6,0,$7)
      RETURNING *`,
     [hostelRecordId, studentId, periodFrom, periodTo, hostelFee, messFee, notes]
   );
@@ -53,8 +73,9 @@ const ensurePeriod = async (
 router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
   try {
     const { search } = req.query;
-    const periodFrom = dateValue(req.query.period_from) || new Date().toISOString().slice(0, 10);
-    const periodTo = dateValue(req.query.period_to) || periodFrom;
+    const selectedMonth = monthPeriod(req.query.period_month);
+    const periodFrom = selectedMonth?.from || dateValue(req.query.period_from) || new Date().toISOString().slice(0, 10);
+    const periodTo = selectedMonth?.to || dateValue(req.query.period_to) || periodFrom;
 
     let q = `
       SELECT
@@ -97,6 +118,7 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
       ) fp ON TRUE
       WHERE s.accommodation_type = 'hostel'
         AND s.status NOT IN ('discontinued')
+        AND date_trunc('month', COALESCE(s.admission_date, s.created_at)::date) <= $1::date
     `;
 
     const params: unknown[] = [periodFrom, periodTo];
@@ -117,8 +139,9 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
 // POST /api/hostel/bulk-period — set one period for every active hostel student.
 router.post('/bulk-period', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
   try {
-    const from = dateValue(req.body?.period_from);
-    const to = dateValue(req.body?.period_to);
+    const selectedMonth = monthPeriod(req.body?.period_month);
+    const from = selectedMonth?.from || dateValue(req.body?.period_from);
+    const to = selectedMonth?.to || dateValue(req.body?.period_to);
     const hf = parseFloat(req.body?.hostel_fee);
     const mf = parseFloat(req.body?.mess_fee);
     if (!from || !to || from > to || !Number.isFinite(hf) || hf < 0 || !Number.isFinite(mf) || mf < 0) {
@@ -130,8 +153,10 @@ router.post('/bulk-period', authorize('super_admin', 'admin'), async (req: AuthR
       `SELECT hr.id AS hostel_record_id, hr.student_id, hr.notes
        FROM hostel_records hr
        JOIN students s ON s.id=hr.student_id
-       WHERE s.accommodation_type='hostel' AND s.status <> 'discontinued'`
-    );
+       WHERE s.accommodation_type='hostel'
+         AND s.status <> 'discontinued'
+         AND date_trunc('month', COALESCE(s.admission_date, s.created_at)::date) <= $1::date`
+    , [from]);
 
     for (const row of students.rows) {
       await ensurePeriod(row.hostel_record_id, row.student_id, from, to, hf, mf, row.notes || null);
@@ -183,7 +208,7 @@ router.post('/:id/payments', authorize('super_admin', 'admin'), async (req: Auth
       res.status(400).json({ success: false, message: 'Invalid hostel record ID' });
       return;
     }
-    const { amount, payment_date, payment_method, reference, notes, period_id, period_from, period_to } = req.body;
+    const { amount, payment_date, payment_method, reference, notes, period_id, period_month, period_from, period_to } = req.body;
     const amt = parseFloat(amount);
     if (!Number.isFinite(amt) || amt <= 0) {
       res.status(400).json({ success: false, message: 'Amount must be greater than 0' });
@@ -203,8 +228,9 @@ router.post('/:id/payments', authorize('super_admin', 'admin'), async (req: Auth
 
     let selectedPeriodId = Number(period_id) || null;
     if (!selectedPeriodId) {
-      const from = dateValue(period_from);
-      const to = dateValue(period_to);
+      const selectedMonth = monthPeriod(period_month);
+      const from = selectedMonth?.from || dateValue(period_from);
+      const to = selectedMonth?.to || dateValue(period_to);
       if (!from || !to || from > to) {
         res.status(400).json({ success: false, message: 'Valid fee period is required' });
         return;
@@ -357,14 +383,16 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
     const id = parseInt(req.params.id, 10);
     const hf = parseFloat(req.body?.hostel_fee);
     const mf = parseFloat(req.body?.mess_fee);
-    const from = dateValue(req.body?.period_from);
-    const to = dateValue(req.body?.period_to);
+    const periodId = Number(req.body?.period_id) || null;
+    const selectedMonth = monthPeriod(req.body?.period_month);
+    const from = selectedMonth?.from || dateValue(req.body?.period_from);
+    const to = selectedMonth?.to || dateValue(req.body?.period_to);
     if (isNaN(id) || !Number.isFinite(hf) || hf < 0 || !Number.isFinite(mf) || mf < 0) {
       res.status(400).json({ success: false, message: 'Valid hostel and mess fees are required' });
       return;
     }
-    if (!from || !to || from > to) {
-      res.status(400).json({ success: false, message: 'Valid fee period from/to dates are required' });
+    if (!periodId && (!from || !to || from > to)) {
+      res.status(400).json({ success: false, message: 'Valid monthly fee period is required' });
       return;
     }
 
@@ -373,17 +401,27 @@ router.put('/:id', authorize('super_admin', 'admin'), async (req: AuthRequest, r
       res.status(404).json({ success: false, message: 'Hostel record not found' });
       return;
     }
-    const period = await ensurePeriod(id, hrResult.rows[0].student_id, from, to, hf, mf, req.body?.notes || null);
+    const period = periodId
+      ? (await query('SELECT * FROM hostel_fee_periods WHERE id=$1 AND hostel_record_id=$2', [periodId, id])).rows[0]
+      : await ensurePeriod(id, hrResult.rows[0].student_id, from!, to!, hf, mf, req.body?.notes || null);
+    if (!period) {
+      res.status(404).json({ success: false, message: 'Fee period not found' });
+      return;
+    }
     const result = await query(
       `UPDATE hostel_fee_periods
-       SET discount = LEAST(COALESCE(discount,0), $1::numeric + $2::numeric), updated_at=NOW()
+       SET hostel_fee=$1,
+           mess_fee=$2,
+           discount=LEAST(COALESCE(discount,0), $1::numeric + $2::numeric),
+           notes=$4,
+           updated_at=NOW()
        WHERE id=$3
        RETURNING id AS period_id, hostel_fee::numeric, mess_fee::numeric,
          (hostel_fee+mess_fee)::numeric AS total_fee, discount::numeric,
          COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp WHERE hp.period_id=hostel_fee_periods.id),0)::numeric AS paid_amount,
          GREATEST(hostel_fee+mess_fee-discount-COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp WHERE hp.period_id=hostel_fee_periods.id),0),0)::numeric AS pending_balance,
          notes, TO_CHAR(start_date,'YYYY-MM-DD') AS period_from, TO_CHAR(end_date,'YYYY-MM-DD') AS period_to`,
-      [hf, mf, period.id]
+      [hf, mf, period.id, req.body?.notes || null]
     );
     // Keep legacy fields in sync for older screens/logic; period data remains the source for monthly tracking.
     // Keep only the legacy fee/notes fields in sync. Monthly discount belongs to

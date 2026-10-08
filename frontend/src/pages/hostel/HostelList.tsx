@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { FiEdit2, FiDollarSign, FiX, FiSearch, FiClock, FiLayers, FiCalendar } from 'react-icons/fi';
+import { FiEdit2, FiDollarSign, FiX, FiSearch, FiClock, FiLayers } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../../api/axios';
 
@@ -57,6 +57,26 @@ const monthStart = () => {
 const monthEnd = () => {
   const d = new Date();
   return localISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
+};
+
+const monthValue = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+const monthStartFor = (value: string) => `${value}-01`;
+const monthEndFor = (value: string) => {
+  const [year, month] = value.split('-').map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return `${value}-${String(lastDay).padStart(2, '0')}`;
+};
+const monthLabel = (value: string) => {
+  const [year, month] = value.split('-').map(Number);
+  if (!year || !month) return value;
+  return new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+};
+const monthOptions = () => {
+  const now = new Date();
+  return Array.from({ length: 85 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - 36 + i, 1);
+    return monthValue(d);
+  });
 };
 
 const displayDate = (value: string | null | undefined) => {
@@ -175,12 +195,14 @@ const HostelList: React.FC = () => {
   const [students, setStudents] = useState<HostelStudent[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [periodFrom, setPeriodFrom] = useState(monthStart());
-  const [periodTo, setPeriodTo] = useState(monthEnd());
+  const [periodMonth, setPeriodMonth] = useState(monthValue(new Date()));
+
+  const periodFrom = monthStartFor(periodMonth);
+  const periodTo = monthEndFor(periodMonth);
 
   const [editModal, setEditModal] = useState(false);
   const [editTarget, setEditTarget] = useState<HostelStudent | null>(null);
-  const [feeForm, setFeeForm] = useState({ from: '', to: '', hostel_fee: '', mess_fee: '', notes: '' });
+  const [feeForm, setFeeForm] = useState({ hostel_fee: '', mess_fee: '', notes: '' });
   const [savingFee, setSavingFee] = useState(false);
 
   const [payModal, setPayModal] = useState(false);
@@ -199,20 +221,15 @@ const HostelList: React.FC = () => {
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   const [bulkModal, setBulkModal] = useState(false);
-  const [bulkFrom, setBulkFrom] = useState(monthStart());
-  const [bulkTo, setBulkTo] = useState(monthEnd());
+  const [bulkMonth, setBulkMonth] = useState(monthValue(new Date()));
   const [bulkHostelFee, setBulkHostelFee] = useState('');
   const [bulkMessFee, setBulkMessFee] = useState('');
   const [savingBulk, setSavingBulk] = useState(false);
 
   const load = useCallback(async () => {
-    if (periodFrom > periodTo) {
-      toast.error('From date must be before To date');
-      return;
-    }
     try {
       setLoading(true);
-      const params: Record<string, string> = { period_from: periodFrom, period_to: periodTo };
+      const params: Record<string, string> = { period_month: periodMonth };
       if (search.trim()) params.search = search.trim();
       const r = await api.get('/hostel', { params });
       setStudents((r.data.data || []).map((row: Record<string, unknown>) => normalise(row)));
@@ -221,7 +238,7 @@ const HostelList: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [periodFrom, periodTo, search]);
+  }, [periodMonth, search]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -233,8 +250,6 @@ const HostelList: React.FC = () => {
   const openEdit = (s: HostelStudent) => {
     setEditTarget(s);
     setFeeForm({
-      from: s.period_from || periodFrom,
-      to: s.period_to || periodTo,
       hostel_fee: String(s.hostel_fee),
       mess_fee: String(s.mess_fee),
       notes: s.notes ?? '',
@@ -251,14 +266,14 @@ const HostelList: React.FC = () => {
       toast.error('Enter valid hostel and mess fees');
       return;
     }
-    if (!feeForm.from || !feeForm.to || feeForm.from > feeForm.to) {
-      toast.error('Select a valid From and To date');
+    if (!editTarget.period_id) {
+      toast.error('Set the monthly fee for this period first');
       return;
     }
     setSavingFee(true);
     try {
       await api.put(`/hostel/${editTarget.hostel_record_id}`, {
-        hostel_fee: hf, mess_fee: mf, period_from: feeForm.from, period_to: feeForm.to, notes: feeForm.notes || null,
+        hostel_fee: hf, mess_fee: mf, period_id: editTarget.period_id, period_month: periodMonth, notes: feeForm.notes || null,
       });
       toast.success('Fees updated successfully');
       setEditModal(false);
@@ -349,14 +364,13 @@ const HostelList: React.FC = () => {
     const hf = parseFloat(bulkHostelFee);
     const mf = parseFloat(bulkMessFee);
     if (!Number.isFinite(hf) || hf < 0 || !Number.isFinite(mf) || mf < 0) { toast.error('Enter valid hostel and mess fees'); return; }
-    if (!bulkFrom || !bulkTo || bulkFrom > bulkTo) { toast.error('Select a valid From and To date'); return; }
+    if (!/^\d{4}-\d{2}$/.test(bulkMonth)) { toast.error('Select a valid month'); return; }
     setSavingBulk(true);
     try {
-      const r = await api.post('/hostel/bulk-period', { period_from: bulkFrom, period_to: bulkTo, hostel_fee: hf, mess_fee: mf });
+      const r = await api.post('/hostel/bulk-period', { period_month: bulkMonth, hostel_fee: hf, mess_fee: mf });
       toast.success(`Fees applied to ${r.data.data?.count || 0} hostel students`);
       setBulkModal(false);
-      setPeriodFrom(bulkFrom);
-      setPeriodTo(bulkTo);
+      setPeriodMonth(bulkMonth);
       setBulkHostelFee('');
       setBulkMessFee('');
     } catch (err: any) {
@@ -374,7 +388,7 @@ const HostelList: React.FC = () => {
           <h1 className="page-title">🏠 Hostel Management</h1>
           <p className="page-subtitle">Candidates staying in hostel — monthly fee tracking &amp; payments</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setBulkFrom(periodFrom); setBulkTo(periodTo); setBulkHostelFee(''); setBulkMessFee(''); setBulkModal(true); }}>
+        <button className="btn btn-primary" onClick={() => { setBulkMonth(periodMonth); setBulkHostelFee(''); setBulkMessFee(''); setBulkModal(true); }}>
           <FiLayers /> Set Hostel &amp; Mess Fee
         </button>
       </div>
@@ -397,16 +411,14 @@ const HostelList: React.FC = () => {
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'end' }}>
-          <div className="form-group" style={{ margin: 0 }}>
-            <label className="form-label"><FiCalendar /> Fee Period From</label>
-            <DateField value={periodFrom} onChange={setPeriodFrom} label="Fee Period From" />
-          </div>
-          <div className="form-group" style={{ margin: 0 }}>
-            <label className="form-label">To</label>
-            <DateField value={periodTo} onChange={setPeriodTo} min={periodFrom} label="Fee Period To" />
+          <div className="form-group" style={{ margin: 0, minWidth: 220 }}>
+            <label className="form-label">Monthly Fee Period</label>
+            <select className="form-control" value={periodMonth} onChange={e => setPeriodMonth(e.target.value)}>
+              {monthOptions().map(month => <option key={month} value={month}>{monthLabel(month)}</option>)}
+            </select>
           </div>
           <div style={{ color: 'var(--text-muted)', fontSize: 12, paddingBottom: 10 }}>
-            Showing fee data for <strong>{displayDate(periodFrom)}</strong> to <strong>{displayDate(periodTo)}</strong>.
+            Period: <strong>{monthLabel(periodMonth)}</strong> ({displayDate(periodFrom)} → {displayDate(periodTo)})
           </div>
         </div>
       </div>
@@ -453,8 +465,7 @@ const HostelList: React.FC = () => {
         <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(99,102,241,0.08)', borderRadius: 8 }}><div style={{ fontWeight: 700 }}>{editTarget.full_name}</div><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{editTarget.student_code}</div></div>
         <form onSubmit={handleSaveFee}>
           <div className="form-grid">
-            <div className="form-group"><label className="form-label">Fee Period From *</label><DateField value={feeForm.from} onChange={v => setFeeForm(f => ({ ...f, from: v }))} label="Fee Period From" required /></div>
-            <div className="form-group"><label className="form-label">To *</label><DateField value={feeForm.to} onChange={v => setFeeForm(f => ({ ...f, to: v }))} min={feeForm.from} label="Fee Period To" required /></div>
+            <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Monthly Fee Period</label><div className="form-control" style={{ display: 'flex', alignItems: 'center' }}>{monthLabel(periodMonth)} ({displayDate(periodFrom)} → {displayDate(periodTo)})</div></div>
             <div className="form-group"><label className="form-label">Hostel Fee (₹)</label><input type="number" className="form-control" min="0" step="any" value={feeForm.hostel_fee} onChange={e => setFeeForm(f => ({ ...f, hostel_fee: e.target.value }))} required /></div>
             <div className="form-group"><label className="form-label">Mess Fee (₹)</label><input type="number" className="form-control" min="0" step="any" value={feeForm.mess_fee} onChange={e => setFeeForm(f => ({ ...f, mess_fee: e.target.value }))} required /></div>
             <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Notes</label><textarea className="form-control" rows={2} value={feeForm.notes} onChange={e => setFeeForm(f => ({ ...f, notes: e.target.value }))} /></div>
@@ -493,12 +504,11 @@ const HostelList: React.FC = () => {
         <div className="modal-header"><h2 className="modal-title">🏠 Set Hostel &amp; Mess Fee</h2><button className="modal-close" onClick={() => setBulkModal(false)}><FiX /></button></div>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>Set one monthly/custom fee period for <strong>all hostel students</strong>. Previous periods remain unchanged.</p>
         <form onSubmit={handleBulkSetFee}><div className="form-grid">
-          <div className="form-group"><label className="form-label">Fee Period From *</label><DateField value={bulkFrom} onChange={setBulkFrom} label="Fee Period From" required /></div>
-          <div className="form-group"><label className="form-label">To *</label><DateField value={bulkTo} onChange={setBulkTo} min={bulkFrom} label="Fee Period To" required /></div>
-          <div className="form-group"><label className="form-label">Hostel Fee (₹) *</label><input type="number" className="form-control" min="0" step="any" value={bulkHostelFee} onChange={e => setBulkHostelFee(e.target.value)} required /></div>
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Monthly Fee Period *</label><select className="form-control" value={bulkMonth} onChange={e => setBulkMonth(e.target.value)}>{monthOptions().map(month => <option key={month} value={month}>{monthLabel(month)}</option>)}</select><div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-muted)' }}>{displayDate(monthStartFor(bulkMonth))} → {displayDate(monthEndFor(bulkMonth))}</div></div>
+            <div className="form-group"><label className="form-label">Hostel Fee (₹) *</label><input type="number" className="form-control" min="0" step="any" value={bulkHostelFee} onChange={e => setBulkHostelFee(e.target.value)} required /></div>
           <div className="form-group"><label className="form-label">Mess Fee (₹) *</label><input type="number" className="form-control" min="0" step="any" value={bulkMessFee} onChange={e => setBulkMessFee(e.target.value)} required /></div>
         </div>
-        {(bulkHostelFee || bulkMessFee) && <div style={{ padding: '12px 14px', background: 'rgba(16,185,129,0.07)', borderRadius: 8, marginBottom: 16, fontSize: 13 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Period</span><strong>{displayDate(bulkFrom)} - {displayDate(bulkTo)}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Hostel Fee</span><strong>{fmt(parseFloat(bulkHostelFee) || 0)}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Mess Fee</span><strong>{fmt(parseFloat(bulkMessFee) || 0)}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, borderTop: '1px solid var(--border-light)', paddingTop: 6, marginTop: 4 }}><span>Total per Student</span><span style={{ color: 'var(--accent)' }}>{fmt((parseFloat(bulkHostelFee) || 0) + (parseFloat(bulkMessFee) || 0))}</span></div></div>}
+        {(bulkHostelFee || bulkMessFee) && <div style={{ padding: '12px 14px', background: 'rgba(16,185,129,0.07)', borderRadius: 8, marginBottom: 16, fontSize: 13 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Period</span><strong>{displayDate(monthStartFor(bulkMonth))} - {displayDate(monthEndFor(bulkMonth))}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Hostel Fee</span><strong>{fmt(parseFloat(bulkHostelFee) || 0)}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Mess Fee</span><strong>{fmt(parseFloat(bulkMessFee) || 0)}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, borderTop: '1px solid var(--border-light)', paddingTop: 6, marginTop: 4 }}><span>Total per Student</span><span style={{ color: 'var(--accent)' }}>{fmt((parseFloat(bulkHostelFee) || 0) + (parseFloat(bulkMessFee) || 0))}</span></div></div>}
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14, padding: '8px 12px', background: 'rgba(99,102,241,0.07)', borderRadius: 8 }}>This will create/update the selected period for every active hostel student.</div>
         <div className="form-actions"><button type="submit" className="btn btn-primary" disabled={savingBulk}>{savingBulk ? 'Applying...' : '✓ Set Fee'}</button><button type="button" className="btn btn-secondary" onClick={() => setBulkModal(false)}>Cancel</button></div>
         </form>

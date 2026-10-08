@@ -4,6 +4,22 @@ import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 
 const router = Router();
 router.use(authenticate);
+
+const reportMonthPeriod = (value: unknown): { from: string; to: string } => {
+  const raw = String(value ?? '');
+  if (/^\d{4}-\d{2}$/.test(raw)) {
+    const [year, month] = raw.split('-').map(Number);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return {
+      from: `${raw}-01`,
+      to: `${raw}-${String(lastDay).padStart(2, '0')}`,
+    };
+  }
+  const now = new Date();
+  const rawMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return { from: `${rawMonth}-01`, to: `${rawMonth}-${String(lastDay).padStart(2, '0')}` };
+};
 router.use(authorize('super_admin', 'admin'));
 
 router.get('/course', async (_req: AuthRequest, res: Response) => {
@@ -62,8 +78,9 @@ router.get('/enrollment', async (_req: AuthRequest, res: Response) => {
   }
 });
 
-router.get('/hostel', async (_req: AuthRequest, res: Response) => {
+router.get('/hostel', async (req: AuthRequest, res: Response) => {
   try {
+    const { from, to } = reportMonthPeriod(req.query.period_month);
     const result = await query(`
       SELECT
         hr.id AS hostel_record_id,
@@ -72,6 +89,8 @@ router.get('/hostel', async (_req: AuthRequest, res: Response) => {
         c.course_name,
         b.batch_name,
         TO_CHAR(s.admission_date, 'DD/MM/YYYY') AS admission_date,
+        TO_CHAR(fp.start_date, 'DD/MM/YYYY') AS period_from,
+        TO_CHAR(fp.end_date, 'DD/MM/YYYY') AS period_to,
         COALESCE(fp.hostel_fee,0)::numeric AS hostel_fee,
         COALESCE(fp.mess_fee,0)::numeric AS mess_fee,
         (COALESCE(fp.hostel_fee,0)+COALESCE(fp.mess_fee,0))::numeric AS total_fee,
@@ -88,13 +107,16 @@ router.get('/hostel', async (_req: AuthRequest, res: Response) => {
       LEFT JOIN batches b ON b.id=s.batch_id
       LEFT JOIN LATERAL (
         SELECT hfp.* FROM hostel_fee_periods hfp
-        WHERE hfp.hostel_record_id=hr.id AND CURRENT_DATE BETWEEN hfp.start_date AND hfp.end_date
+        WHERE hfp.hostel_record_id=hr.id
+          AND hfp.start_date=$1::date
+          AND hfp.end_date=$2::date
         ORDER BY hfp.start_date DESC, hfp.id DESC LIMIT 1
       ) fp ON TRUE
       WHERE s.status != 'discontinued'
+        AND date_trunc('month', COALESCE(s.admission_date, s.created_at)::date) <= $1::date
       ORDER BY s.full_name ASC
-    `);
-    res.json({ success: true, data: result.rows });
+    `, [from, to]);
+    res.json({ success: true, data: result.rows, period: { period_from: from, period_to: to } });
   } catch (err) {
     console.error('GET /reports/hostel error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -141,10 +163,12 @@ router.get('/uniform', async (_req: AuthRequest, res: Response) => {
         COALESCE(su.set_count, 0)::integer AS set_count,
         CASE su.uniform_year WHEN '1st Year' THEN 1400 WHEN '2nd Year' THEN 1000 ELSE 0 END::numeric AS price_per_set,
         (COALESCE(su.set_count, 0) * CASE su.uniform_year WHEN '1st Year' THEN 1400 WHEN '2nd Year' THEN 1000 ELSE 0 END)::numeric AS total_amount,
-        COALESCE((SELECT SUM(p.amount) FROM payments p
-          WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'),0)::numeric AS amount_paid,
-        GREATEST((COALESCE(su.set_count, 0) * CASE su.uniform_year WHEN '1st Year' THEN 1400 WHEN '2nd Year' THEN 1000 ELSE 0 END) - COALESCE((SELECT SUM(p.amount) FROM payments p
-          WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'),0),0)::numeric AS balance_due
+        COALESCE((SELECT p.amount FROM payments p
+          WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'
+          ORDER BY p.created_at DESC, p.id DESC LIMIT 1),0)::numeric AS amount_paid,
+        GREATEST((COALESCE(su.set_count, 0) * CASE su.uniform_year WHEN '1st Year' THEN 1400 WHEN '2nd Year' THEN 1000 ELSE 0 END) - COALESCE((SELECT p.amount FROM payments p
+          WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'
+          ORDER BY p.created_at DESC, p.id DESC LIMIT 1),0),0)::numeric AS balance_due
       FROM students s
       LEFT JOIN student_uniform su ON su.student_id=s.id
       LEFT JOIN courses c ON c.id=s.course_id

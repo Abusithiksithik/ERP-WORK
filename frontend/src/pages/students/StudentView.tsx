@@ -63,12 +63,11 @@ const StudentView: React.FC = () => {
 
   // Uniform modal
   const [showUniformModal, setShowUniformModal]   = useState(false);
-  const [uniformStatus, setUniformStatus]         = useState<'received' | 'not_received' | 'pending'>('pending');
-  const [uniformYear, setUniformYear] = useState<UniformYear>('1st Year');
+    const [uniformYear, setUniformYear] = useState<UniformYear>('1st Year');
   const [uniformSetCount, setUniformSetCount]     = useState<1 | 2>(1);
   const [uniformPayment, setUniformPayment]       = useState('');
   const [uniformPaymentDate, setUniformPaymentDate] = useState(new Date().toISOString().split('T')[0]);
-  const [uniformStep, setUniformStep]             = useState<'status' | 'year' | 'sets' | 'payment'>('status');
+  const [uniformStep, setUniformStep]             = useState<'year' | 'sets' | 'payment'>('year');
   const [uniformLoading, setUniformLoading]       = useState(false);
 
   const fetchData = useCallback(async () => {
@@ -145,18 +144,6 @@ const StudentView: React.FC = () => {
     finally { setMatLoading(false); }
   };
 
-  // ── Update Uniform ──────────────────────────────────────────────────
-  const handleUniformSimpleStatus = async (status: 'not_received' | 'pending') => {
-    setUniformLoading(true);
-    try {
-      await api.put(`/student-materials/uniform/${id}`, { status });
-      toast.success(status === 'pending' ? 'Uniform marked pending' : 'Uniform marked not received');
-      setShowUniformModal(false);
-      fetchData();
-    } catch { toast.error('Failed to update uniform status'); }
-    finally { setUniformLoading(false); }
-  };
-
   const handleUniformPaymentSubmit = async () => {
     const amount = uniformFee(uniformYear, uniformSetCount);
     setUniformLoading(true);
@@ -178,19 +165,12 @@ const StudentView: React.FC = () => {
   };
 
   const openUniformModal = () => {
-    setUniformStatus(uniform?.status || 'pending');
     setUniformYear(uniform?.uniform_year === '2nd Year' ? '2nd Year' : '1st Year');
     setUniformSetCount(uniform?.set_count === 2 ? 2 : 1);
     setUniformPayment('');
     setUniformPaymentDate(new Date().toISOString().split('T')[0]);
-    setUniformStep('status');
+    setUniformStep('year');
     setShowUniformModal(true);
-  };
-
-  const chooseUniformStatus = (status: 'received' | 'not_received' | 'pending') => {
-    setUniformStatus(status);
-    if (status === 'received') setUniformStep('year');
-    else handleUniformSimpleStatus(status);
   };
 
   const chooseUniformSets = (count: 1 | 2) => {
@@ -220,8 +200,7 @@ const StudentView: React.FC = () => {
 
   const uniformLabel: Record<string, { text: string; color: string; emoji: string }> = {
     received:     { text: 'Received',     color: 'var(--teal)', emoji: '✅' },
-    not_received: { text: 'Not Received', color: 'var(--red)',  emoji: '❌' },
-    pending:      { text: 'Pending',      color: 'var(--amber)', emoji: '⏳' },
+    not_received: { text: 'Not Received', color: 'var(--text-muted)', emoji: '—' },
   };
 
   return (
@@ -565,8 +544,8 @@ const StudentView: React.FC = () => {
               >
                 <span className="mat-icon">👕</span>
                 <span>Uniform</span>
-                <span style={{ fontSize: 11, color: uniformLabel[uniform?.status || 'pending'].color }}>
-                  {uniformLabel[uniform?.status || 'pending'].emoji} {uniformLabel[uniform?.status || 'pending'].text}
+                <span style={{ fontSize: 11, color: (uniformLabel[uniform?.status || 'not_received'] || uniformLabel.not_received).color }}>
+                  {(uniformLabel[uniform?.status || 'not_received'] || uniformLabel.not_received).emoji} {(uniformLabel[uniform?.status || 'not_received'] || uniformLabel.not_received).text}
                 </span>
               </button>
             </div>
@@ -652,23 +631,6 @@ const StudentView: React.FC = () => {
               </div>
               <button className="modal-close" onClick={() => setShowUniformModal(false)}><FiX /></button>
             </div>
-
-            {uniformStep === 'status' && (
-              <div>
-                <label className="form-label" style={{ marginBottom: 12 }}>Uniform status</label>
-                <div className="uniform-status-group">
-                  <button type="button" className="uniform-status-btn selected-received" onClick={() => chooseUniformStatus('received')}>
-                    ✅ Received
-                  </button>
-                  <button type="button" className="uniform-status-btn selected-not_received" onClick={() => chooseUniformStatus('not_received')}>
-                    ❌ Not Received
-                  </button>
-                  <button type="button" className="uniform-status-btn selected-pending" onClick={() => chooseUniformStatus('pending')}>
-                    ⏳ Pending
-                  </button>
-                </div>
-              </div>
-            )}
 
             {uniformStep === 'year' && (
               <div>
