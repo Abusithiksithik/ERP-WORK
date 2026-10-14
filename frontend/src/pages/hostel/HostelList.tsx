@@ -5,6 +5,7 @@ import api from '../../api/axios';
 
 interface HostelStudent {
   hostel_record_id: number;
+  has_fee_schedule: boolean;
   student_id: number;
   student_code: string;
   full_name: string;
@@ -34,6 +35,40 @@ interface HostelPayment {
   notes: string | null;
   recorded_by_name: string | null;
   created_at: string;
+}
+
+interface HostelFeePeriod {
+  period_id: number;
+  period_from: string;
+  period_to: string;
+  hostel_fee: number;
+  mess_fee: number;
+  total_fee: number;
+  discount: number;
+  paid_amount: number;
+  pending_balance: number;
+  payment_count: number;
+}
+
+interface HostelFeeRevision {
+  id: number;
+  effective_from: string;
+  effective_to: string;
+  previous_hostel_fee: number | null;
+  previous_mess_fee: number | null;
+  new_hostel_fee: number;
+  new_mess_fee: number;
+  notes: string | null;
+  created_at: string;
+  changed_by_name: string | null;
+}
+
+interface HostelHistory {
+  active_schedule: { id: number; start_date: string; end_date: string; created_at: string } | null;
+  summary: { months: number; total_fee: number; total_paid: number; total_pending: number };
+  periods: HostelFeePeriod[];
+  payments: (HostelPayment & { period_id: number | null; period_from: string | null; period_to: string | null })[];
+  revisions: HostelFeeRevision[];
 }
 
 const toNum = (v: unknown): number => {
@@ -84,6 +119,16 @@ const addMonths = (date: string, amount: number) => {
   const [year, month] = date.slice(0, 10).split('-').map(Number);
   const d = new Date(year, month - 1 + amount, 1);
   return localISO(d);
+};
+const monthAfterDate = (date: string) => {
+  const [year, month] = date.slice(0, 7).split('-').map(Number);
+  return monthValue(new Date(year, month, 1));
+};
+const monthDifference = (start: string, endExclusive: string) => {
+  if (!/^\d{4}-\d{2}$/.test(start) || !/^\d{4}-\d{2}$/.test(endExclusive)) return 0;
+  const [sy, sm] = start.split('-').map(Number);
+  const [ey, em] = endExclusive.split('-').map(Number);
+  return Math.max(0, (ey * 12 + em) - (sy * 12 + sm));
 };
 
 const displayDate = (value: string | null | undefined) => {
@@ -180,6 +225,7 @@ const DateField: React.FC<DateFieldProps> = ({ value, onChange, min, max, requir
 
 const normalise = (row: Record<string, unknown>): HostelStudent => ({
   hostel_record_id: toNum(row.hostel_record_id),
+  has_fee_schedule: Boolean(row.has_fee_schedule),
   student_id: toNum(row.student_id),
   student_code: String(row.student_code ?? ''),
   full_name: String(row.full_name ?? ''),
@@ -220,6 +266,10 @@ const HostelList: React.FC = () => {
   const [editTarget, setEditTarget] = useState<HostelStudent | null>(null);
   const [feeForm, setFeeForm] = useState({ hostel_fee: '', mess_fee: '', start_date: '', end_date: '', notes: '' });
   const [savingFee, setSavingFee] = useState(false);
+  const [feeSaveError, setFeeSaveError] = useState('');
+  const [returnToHistory, setReturnToHistory] = useState(false);
+  const [editPeriodsSnapshot, setEditPeriodsSnapshot] = useState<HostelFeePeriod[]>([]);
+  const [feeMode, setFeeMode] = useState<'create' | 'revision'>('create');
 
   const [payModal, setPayModal] = useState(false);
   const [payTarget, setPayTarget] = useState<HostelStudent | null>(null);
@@ -233,7 +283,7 @@ const HostelList: React.FC = () => {
 
   const [historyModal, setHistoryModal] = useState(false);
   const [historyTarget, setHistoryTarget] = useState<HostelStudent | null>(null);
-  const [payments, setPayments] = useState<HostelPayment[]>([]);
+  const [hostelHistory, setHostelHistory] = useState<HostelHistory | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
 
@@ -259,17 +309,69 @@ const HostelList: React.FC = () => {
   const totalPaid = useMemo(() => students.reduce((s, r) => s + r.paid_amount, 0), [students]);
   const totalPending = useMemo(() => students.reduce((s, r) => s + r.pending_balance, 0), [students]);
 
-  const openEdit = (s: HostelStudent) => {
+  const openEdit = async (s: HostelStudent) => {
+    setReturnToHistory(false);
+    setFeeSaveError('');
     setEditTarget(s);
-    const joiningDate = s.joining_date || periodFrom;
-    const courseEnd = monthEndFor(monthValue(new Date(addMonths(joiningDate, courseMonths(s.course_duration) - 1))));
-    setFeeForm({
-      hostel_fee: String(s.hostel_fee),
-      mess_fee: String(s.mess_fee),
-      start_date: periodFrom,
-      end_date: courseEnd >= periodFrom ? courseEnd : periodTo,
-      notes: s.notes ?? '',
-    });
+    if (s.has_fee_schedule) {
+      // Edit opens the fee editor directly; Payment History remains a separate action.
+      try {
+        const response = await api.get(`/hostel/${s.hostel_record_id}/history`);
+        const data = response.data?.data || {};
+        const schedule = data.active_schedule;
+        const rawPeriods = (data.periods || []) as Record<string, unknown>[];
+        const periods = rawPeriods.map(p => ({
+          period_id: toNum(p.period_id), period_from: String(p.period_from || ''), period_to: String(p.period_to || ''),
+          hostel_fee: toNum(p.hostel_fee), mess_fee: toNum(p.mess_fee), total_fee: toNum(p.total_fee), discount: toNum(p.discount),
+          paid_amount: toNum(p.paid_amount), pending_balance: toNum(p.pending_balance), payment_count: toNum(p.payment_count),
+        } as HostelFeePeriod));
+        setEditPeriodsSnapshot(periods);
+        if (!schedule) {
+          setEditPeriodsSnapshot([]);
+          toast.info('No active fee schedule exists. Create a new schedule.');
+          setFeeMode('create');
+          const joiningMonth = monthValue(new Date(`${(s.joining_date || periodFrom).slice(0, 10)}T00:00:00`));
+          const endMonth = monthValue(new Date(`${addMonths(s.joining_date || periodFrom, courseMonths(s.course_duration))}T00:00:00`));
+          setFeeForm({ hostel_fee: String(s.hostel_fee || 0), mess_fee: String(s.mess_fee || 0), start_date: joiningMonth, end_date: endMonth, notes: s.notes ?? '' });
+        } else {
+          setEditTarget({ ...s, period_from: String(schedule.start_date || s.period_from || '') });
+          const startMonth = monthValue(new Date(`${String(schedule.start_date).slice(0, 10)}T00:00:00`));
+          const endMonth = monthAfterDate(String(schedule.end_date)); // fixed exclusive end month
+          const ordered = [...periods].sort((a, b) => String(a.period_from).localeCompare(String(b.period_from)));
+          const firstUnpaid = ordered.find(p => toNum(p.paid_amount) === 0 && toNum(p.pending_balance) > 0);
+          const paid = ordered.filter(p => toNum(p.paid_amount) > 0);
+          const defaultEffective = firstUnpaid
+            ? monthValue(new Date(`${String(firstUnpaid.period_from).slice(0, 10)}T00:00:00`))
+            : paid.length ? monthAfterDate(String(paid[paid.length - 1].period_from)) : startMonth;
+          const effective = defaultEffective < startMonth ? startMonth : defaultEffective >= endMonth ? startMonth : defaultEffective;
+          const currentRate = ordered.find(p => String(p.period_from).slice(0, 7) === effective) || ordered[ordered.length - 1];
+          setFeeMode('revision');
+          setFeeForm({
+            hostel_fee: String(toNum(currentRate?.hostel_fee ?? s.hostel_fee)),
+            mess_fee: String(toNum(currentRate?.mess_fee ?? s.mess_fee)),
+            start_date: effective,
+            end_date: endMonth,
+            notes: '',
+          });
+        }
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || 'Could not load this student fee schedule');
+        return;
+      }
+    } else {
+      setEditPeriodsSnapshot([]);
+      setFeeMode('create');
+      const joiningDate = s.joining_date || periodFrom;
+      const joiningMonth = monthValue(new Date(`${joiningDate.slice(0, 10)}T00:00:00`));
+      const courseEndMonth = monthValue(new Date(`${addMonths(joiningDate, courseMonths(s.course_duration))}T00:00:00`));
+      setFeeForm({
+        hostel_fee: String(s.hostel_fee || 0),
+        mess_fee: String(s.mess_fee || 0),
+        start_date: joiningMonth,
+        end_date: courseEndMonth > joiningMonth ? courseEndMonth : monthAfterDate(periodTo),
+        notes: s.notes ?? '',
+      });
+    }
     setEditModal(true);
   };
 
@@ -286,20 +388,30 @@ const HostelList: React.FC = () => {
       toast.error('Choose a valid start date and end date');
       return;
     }
-    if (feeForm.start_date < '2025-01-01' || feeForm.end_date > '2030-12-31') {
+    if (feeForm.start_date < '2025-01' || feeForm.end_date > '2030-12') {
       toast.error('Fee dates must be between January 2025 and December 2030');
       return;
     }
     setSavingFee(true);
+    setFeeSaveError('');
     try {
-      await api.put(`/hostel/${editTarget.hostel_record_id}`, {
-        hostel_fee: hf, mess_fee: mf, period_from: feeForm.start_date, period_to: feeForm.end_date, notes: feeForm.notes || null,
+      const endpoint = feeMode === 'revision'
+        ? `/hostel/${editTarget.hostel_record_id}/revision`
+        : `/hostel/${editTarget.hostel_record_id}`;
+      await api.put(endpoint, {
+        hostel_fee: hf, mess_fee: mf, period_from: `${feeForm.start_date}-01`, period_to: `${feeForm.end_date}-01`, notes: feeForm.notes || null,
       });
-      toast.success('Fees updated successfully');
+      toast.success(feeMode === 'revision' ? 'Future monthly fees updated successfully' : 'Fee schedule created successfully');
       setEditModal(false);
+      if (returnToHistory) {
+        setReturnToHistory(false);
+        await openHistory(editTarget);
+      }
       await load();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Failed to update fees');
+      const message = err.response?.data?.message || 'Failed to update fees';
+      setFeeSaveError(message);
+      toast.error(message);
     } finally { setSavingFee(false); }
   };
 
@@ -365,27 +477,152 @@ const HostelList: React.FC = () => {
   const openHistory = async (s: HostelStudent) => {
     setHistoryTarget(s);
     setHistoryModal(true);
-    setPayments([]);
+    setHostelHistory(null);
     setLoadingHistory(true);
     try {
-      const r = await api.get(`/hostel/${s.hostel_record_id}/payments`, { params: { period_id: s.period_id || undefined } });
-      setPayments((r.data.data || []).map((p: Record<string, unknown>) => ({
-        id: toNum(p.id), amount: toNum(p.amount), payment_date: String(p.payment_date ?? ''),
-        payment_method: String(p.payment_method ?? 'cash'), reference: p.reference ? String(p.reference) : null,
-        notes: p.notes ? String(p.notes) : null, recorded_by_name: p.recorded_by_name ? String(p.recorded_by_name) : null,
-        created_at: String(p.created_at ?? ''),
-      })));
-    } catch { toast.error('Failed to load payment history'); }
-    finally { setLoadingHistory(false); }
+      const r = await api.get(`/hostel/${s.hostel_record_id}/history`);
+      const data = r.data.data || {};
+      setHostelHistory({
+        active_schedule: data.active_schedule ? {
+          id: toNum(data.active_schedule.id), start_date: String(data.active_schedule.start_date || ''),
+          end_date: String(data.active_schedule.end_date || ''), created_at: String(data.active_schedule.created_at || ''),
+        } : null,
+        summary: {
+          months: toNum(data.summary?.months),
+          total_fee: toNum(data.summary?.total_fee),
+          total_paid: toNum(data.summary?.total_paid),
+          total_pending: toNum(data.summary?.total_pending),
+        },
+        periods: (data.periods || []).map((p: Record<string, unknown>) => ({
+          period_id: toNum(p.period_id), period_from: String(p.period_from || ''), period_to: String(p.period_to || ''),
+          hostel_fee: toNum(p.hostel_fee), mess_fee: toNum(p.mess_fee), total_fee: toNum(p.total_fee),
+          discount: toNum(p.discount), paid_amount: toNum(p.paid_amount), pending_balance: toNum(p.pending_balance),
+          payment_count: toNum(p.payment_count),
+        })),
+        payments: (data.payments || []).map((p: Record<string, unknown>) => ({
+          id: toNum(p.id), amount: toNum(p.amount), payment_date: String(p.payment_date || ''),
+          payment_method: String(p.payment_method || 'cash'), reference: p.reference ? String(p.reference) : null,
+          notes: p.notes ? String(p.notes) : null, recorded_by_name: p.recorded_by_name ? String(p.recorded_by_name) : null,
+          created_at: String(p.created_at || ''), period_id: p.period_id ? toNum(p.period_id) : null,
+          period_from: p.period_from ? String(p.period_from) : null, period_to: p.period_to ? String(p.period_to) : null,
+        })),
+        revisions: (data.revisions || []).map((r: Record<string, unknown>) => ({
+          id: toNum(r.id), effective_from: String(r.effective_from || ''), effective_to: String(r.effective_to || ''),
+          previous_hostel_fee: r.previous_hostel_fee == null ? null : toNum(r.previous_hostel_fee),
+          previous_mess_fee: r.previous_mess_fee == null ? null : toNum(r.previous_mess_fee),
+          new_hostel_fee: toNum(r.new_hostel_fee), new_mess_fee: toNum(r.new_mess_fee),
+          notes: r.notes ? String(r.notes) : null, created_at: String(r.created_at || ''),
+          changed_by_name: r.changed_by_name ? String(r.changed_by_name) : null,
+        })),
+      });
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to load hostel fee history');
+    } finally { setLoadingHistory(false); }
   };
 
 
+  const startRevision = () => {
+    if (!historyTarget || !hostelHistory) return;
+    const periods = hostelHistory.periods;
+    if (!periods.length && !hostelHistory.active_schedule) {
+      toast.info('Create a fee schedule first.');
+      return;
+    }
+    const lastPeriod = periods[periods.length - 1];
+    const fixedEndMonth = monthAfterDate(hostelHistory.active_schedule?.end_date || lastPeriod?.period_to || '');
+    const scheduleStartMonth = hostelHistory.active_schedule?.start_date
+      ? monthValue(new Date(`${hostelHistory.active_schedule.start_date}T00:00:00`))
+      : periods[0]?.period_from
+        ? monthValue(new Date(`${periods[0].period_from}T00:00:00`))
+        : periodMonth;
+    const paidPeriods = periods.filter(p => p.paid_amount > 0).sort((a, b) => a.period_from.localeCompare(b.period_from));
+    const lastPaid = paidPeriods[paidPeriods.length - 1];
+    const nextMonthAfterLastPaid = (value: string) => {
+      const date = new Date(`${value}T00:00:00`);
+      date.setMonth(date.getMonth() + 1, 1);
+      return monthStartFor(monthValue(date));
+    };
+    const firstUnpaid = periods.find(p => p.pending_balance > 0 && p.paid_amount === 0);
+    const effective = lastPaid ? nextMonthAfterLastPaid(lastPaid.period_from) : (firstUnpaid?.period_from || `${scheduleStartMonth}-01`);
+    if (monthValue(new Date(`${effective}T00:00:00`)) >= fixedEndMonth) {
+      toast.info('There are no future months left to revise in this fee schedule.');
+      return;
+    }
+    setEditTarget({ ...historyTarget, period_from: hostelHistory.active_schedule?.start_date || historyTarget.period_from });
+    setEditPeriodsSnapshot(periods);
+    setReturnToHistory(true);
+    setHistoryModal(false);
+    setFeeMode('revision');
+    setFeeSaveError('');
+    setFeeForm({
+      hostel_fee: String(lastPeriod?.hostel_fee ?? historyTarget.hostel_fee ?? 0),
+      mess_fee: String(lastPeriod?.mess_fee ?? historyTarget.mess_fee ?? 0),
+      start_date: monthValue(new Date(`${effective}T00:00:00`)),
+      end_date: fixedEndMonth,
+      notes: '',
+    });
+    setEditModal(true);
+  };
+
+  const startNewScheduleFromHistory = () => {
+    if (!historyTarget) return;
+    setReturnToHistory(false);
+    setEditPeriodsSnapshot([]);
+    const joiningDate = historyTarget.joining_date || periodFrom;
+    const courseEnd = addMonths(joiningDate, courseMonths(historyTarget.course_duration));
+    const lastPeriod = hostelHistory?.periods[hostelHistory.periods.length - 1];
+    setEditTarget({ ...historyTarget, period_id: null });
+    setFeeMode('create');
+    setFeeSaveError('');
+    setFeeForm({
+      hostel_fee: String(lastPeriod?.hostel_fee ?? historyTarget.hostel_fee ?? 0),
+      mess_fee: String(lastPeriod?.mess_fee ?? historyTarget.mess_fee ?? 0),
+      start_date: monthValue(new Date(`${joiningDate.slice(0, 10)}T00:00:00`)),
+      end_date: monthValue(new Date(`${courseEnd.slice(0, 10)}T00:00:00`)),
+      notes: '',
+    });
+    setHistoryModal(false);
+    setEditModal(true);
+  };
+
+  const deleteFeeSchedule = async () => {
+    if (!historyTarget) return;
+    const confirmed = window.confirm(
+      `Permanently delete ALL hostel fee data for ${historyTarget.full_name} (${historyTarget.student_code})? This removes every hostel fee period, fee schedule, fee revision, and hostel payment transaction for this student. This cannot be undone.`
+    );
+    if (!confirmed) return;
+    try {
+      const response = await api.delete(`/hostel/${historyTarget.hostel_record_id}/history`);
+      const removed = response.data?.data || {};
+      toast.success(`Hostel fee history cleared. ${toNum(removed.periods_removed)} periods and ${toNum(removed.payments_removed)} payments deleted.`);
+      await openHistory(historyTarget);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to clear hostel fee history');
+    }
+  };
 
   const previewTotal = (parseFloat(feeForm.hostel_fee) || 0) + (parseFloat(feeForm.mess_fee) || 0);
   const previewPending = Math.max(0, previewTotal - (editTarget?.discount || 0) - (editTarget?.paid_amount || 0));
-  const previewMonths = feeForm.start_date && feeForm.end_date && feeForm.start_date <= feeForm.end_date
-    ? Math.max(1, (Number(feeForm.end_date.slice(0, 4)) * 12 + Number(feeForm.end_date.slice(5, 7))) - (Number(feeForm.start_date.slice(0, 4)) * 12 + Number(feeForm.start_date.slice(5, 7))) + 1) : 0;
+  const previewMonths = monthDifference(feeForm.start_date, feeForm.end_date);
   const previewRangeTotal = previewTotal * previewMonths;
+  const uniqueEditPeriods = useMemo(() => {
+    const byMonth = new Map<string, HostelFeePeriod>();
+    for (const period of editPeriodsSnapshot) {
+      const month = String(period.period_from || '').slice(0, 7);
+      const prior = byMonth.get(month);
+      if (!prior || period.period_id > prior.period_id) byMonth.set(month, period);
+    }
+    return [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, period]) => period);
+  }, [editPeriodsSnapshot]);
+  const currentScheduleTotal = uniqueEditPeriods.reduce((sum, period) => sum + Math.max(0, period.total_fee - period.discount), 0);
+  const replacedFutureTotal = feeMode === 'revision'
+    ? uniqueEditPeriods.filter(period => String(period.period_from).slice(0, 7) >= feeForm.start_date && String(period.period_from).slice(0, 7) < feeForm.end_date)
+      .reduce((sum, period) => sum + Math.max(0, period.total_fee - period.discount), 0)
+    : 0;
+  const previewCourseTotal = feeMode === 'revision'
+    ? Math.max(0, currentScheduleTotal - replacedFutureTotal + previewRangeTotal)
+    : previewRangeTotal;
 
   return (
     <div>
@@ -474,19 +711,20 @@ const HostelList: React.FC = () => {
       </div>
 
       {editModal && editTarget && <div className="modal-overlay"><div className="modal" style={{ maxWidth: 520 }}>
-        <div className="modal-header"><h2 className="modal-title">✏️ Edit Hostel Fees</h2><button className="modal-close" onClick={() => setEditModal(false)}><FiX /></button></div>
+        <div className="modal-header"><h2 className="modal-title">{feeMode === 'revision' ? '✏️ Edit Future Hostel Fees' : '🧾 Create Hostel Fee Schedule'}</h2><button className="modal-close" onClick={() => setEditModal(false)}><FiX /></button></div>
         <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(99,102,241,0.08)', borderRadius: 8 }}><div style={{ fontWeight: 700 }}>{editTarget.full_name}</div><div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{editTarget.student_code}</div></div>
         <form onSubmit={handleSaveFee}>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>Choose a date range for this student. The monthly fees apply to each month in the range. Existing payment records are retained.</p>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>{feeMode === 'revision' ? 'Choose the month from which the new monthly rates start. The course end month is fixed and cannot be changed. Paid months remain unchanged.' : 'Create one schedule for this student. The selected end month is exclusive: October 2026 to October 2027 creates 12 monthly charges (October through September).'}</p>
+          {feeSaveError && <div role="alert" style={{ padding: '10px 12px', marginBottom: 14, borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', color: '#ef4444', fontSize: 13 }}>{feeSaveError}</div>}
           <div className="form-grid">
-            <div className="form-group"><label className="form-label">Start Date *</label><input type="date" className="form-control" min="2025-01-01" max="2030-12-31" value={feeForm.start_date} onChange={e => setFeeForm(f => ({ ...f, start_date: e.target.value }))} required /></div>
-            <div className="form-group"><label className="form-label">End Date *</label><input type="date" className="form-control" min={feeForm.start_date || '2025-01-01'} max="2030-12-31" value={feeForm.end_date} onChange={e => setFeeForm(f => ({ ...f, end_date: e.target.value }))} required /></div>
+            <div className="form-group"><label className="form-label">{feeMode === 'revision' ? 'Fee Increase From (Month) *' : 'Start Month *'}</label><input type="month" className="form-control" min={feeMode === 'revision' && editTarget?.period_from ? editTarget.period_from.slice(0, 7) : '2025-01'} max={feeForm.end_date || '2030-12'} value={feeForm.start_date} onChange={e => setFeeForm(f => ({ ...f, start_date: e.target.value }))} required /></div>
+            <div className="form-group"><label className="form-label">Course End Month (exclusive) *</label><input type="month" className="form-control" min={feeForm.start_date || '2025-01'} max="2030-12" value={feeForm.end_date} onChange={e => setFeeForm(f => ({ ...f, end_date: e.target.value }))} disabled={feeMode === 'revision'} required /></div>
             <div className="form-group"><label className="form-label">Hostel Fee (₹ / month)</label><input type="number" className="form-control" min="0" step="any" value={feeForm.hostel_fee} onChange={e => setFeeForm(f => ({ ...f, hostel_fee: e.target.value }))} required /></div>
             <div className="form-group"><label className="form-label">Mess Fee (₹ / month)</label><input type="number" className="form-control" min="0" step="any" value={feeForm.mess_fee} onChange={e => setFeeForm(f => ({ ...f, mess_fee: e.target.value }))} required /></div>
             <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Notes</label><textarea className="form-control" rows={2} value={feeForm.notes} onChange={e => setFeeForm(f => ({ ...f, notes: e.target.value }))} /></div>
           </div>
-          <div style={{ padding: '12px 14px', background: 'rgba(16,185,129,0.07)', borderRadius: 8, marginBottom: 16, fontSize: 13 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}><span>Months in selected range</span><strong>{previewMonths}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}><span>Monthly Total</span><strong>{fmt(previewTotal)}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, borderTop: '1px solid var(--border-light)', paddingTop: 6, marginTop: 4 }}><span>Total for selected date range</span><strong>{fmt(previewRangeTotal)}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5 }}><span>Selected month pending (estimate)</span><span style={{ color: previewPending > 0 ? '#ef4444' : '#10b981' }}>{previewPending <= 0 ? '✓ Cleared' : fmt(previewPending)}</span></div></div>
-          <div className="form-actions"><button type="submit" className="btn btn-primary" disabled={savingFee}>{savingFee ? 'Saving...' : 'Save Changes'}</button><button type="button" className="btn btn-secondary" onClick={() => setEditModal(false)}>Cancel</button></div>
+          <div style={{ padding: '12px 14px', background: 'rgba(16,185,129,0.07)', borderRadius: 8, marginBottom: 16, fontSize: 13 }}><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}><span>Months in selected range</span><strong>{previewMonths}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}><span>Monthly Total</span><strong>{fmt(previewTotal)}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}><span>Fee for selected months</span><strong>{fmt(previewRangeTotal)}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, borderTop: '1px solid var(--border-light)', paddingTop: 7, marginTop: 4 }}><span>Total Course Fee After Update</span><strong>{fmt(previewCourseTotal)}</strong></div><div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5 }}><span>Current selected month pending (estimate)</span><span style={{ color: previewPending > 0 ? '#ef4444' : '#10b981' }}>{previewPending <= 0 ? '✓ Cleared' : fmt(previewPending)}</span></div></div>
+          <div className="form-actions"><button type="submit" className="btn btn-primary" disabled={savingFee}>{savingFee ? 'Saving...' : feeMode === 'revision' ? 'Update Schedule' : 'Create Schedule'}</button><button type="button" className="btn btn-secondary" onClick={() => setEditModal(false)}>Cancel</button></div>
         </form>
       </div></div>}
 
@@ -495,7 +733,7 @@ const HostelList: React.FC = () => {
         <div style={{ marginBottom: 16, padding: '12px 14px', background: 'rgba(16,185,129,0.07)', borderRadius: 8 }}><div style={{ fontWeight: 700, marginBottom: 6 }}>{payTarget.full_name} — {payTarget.student_code}</div><div style={{ fontSize: 12, display: 'flex', gap: 16, flexWrap: 'wrap' }}><span>Period: <strong>{displayDate(payTarget.period_from)} - {displayDate(payTarget.period_to)}</strong></span><span>Total: <strong>{fmt(payTarget.total_fee)}</strong></span><span>Paid: <strong style={{ color: '#10b981' }}>{fmt(payTarget.paid_amount)}</strong></span><span>Pending: <strong style={{ color: payTarget.pending_balance > 0 ? '#ef4444' : '#10b981' }}>{payTarget.pending_balance <= 0 ? '✓ Cleared' : fmt(payTarget.pending_balance)}</strong></span></div></div>
         <form onSubmit={handleSavePay}><div className="form-grid">
           <div className="form-group"><label className="form-label">Amount (₹) *</label><input type="number" className="form-control" min="1" step="any" value={payForm.amount} onChange={e => setPayForm(f => ({ ...f, amount: e.target.value }))} required /></div>
-          <div className="form-group"><label className="form-label">Payment Date *</label><DateField value={payForm.payment_date} onChange={v => setPayForm(f => ({ ...f, payment_date: v }))} max={localISO(new Date())} label="Payment Date" required /></div>
+          <div className="form-group"><label className="form-label">Payment Date *</label><input type="date" className="form-control" value={payForm.payment_date} max={localISO(new Date())} onChange={e => setPayForm(f => ({ ...f, payment_date: e.target.value }))} required /></div>
           <div className="form-group"><label className="form-label">Payment Method</label><select className="form-control" value={payForm.payment_method} onChange={e => setPayForm(f => ({ ...f, payment_method: e.target.value }))}><option value="cash">Cash</option><option value="upi">UPI</option><option value="bank_transfer">Bank Transfer</option><option value="cheque">Cheque</option></select></div>
           <div className="form-group"><label className="form-label">Reference</label><input className="form-control" value={payForm.reference} onChange={e => setPayForm(f => ({ ...f, reference: e.target.value }))} /></div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Notes</label><textarea className="form-control" rows={2} value={payForm.notes} onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))} /></div>
@@ -508,11 +746,26 @@ const HostelList: React.FC = () => {
         <form onSubmit={handleSaveDiscount}><div className="form-group"><label className="form-label">Discount Amount (₹) *</label><input type="number" className="form-control" min="0" step="any" value={discountAmount} onChange={e => setDiscountAmount(e.target.value)} required />{Number(discountAmount) > 0 && <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Final Fee: <strong style={{ color: 'var(--teal)' }}>{fmt(Math.max(0, discountTarget.total_fee - Number(discountAmount)))}</strong> · Pending: <strong>{fmt(Math.max(0, discountTarget.total_fee - Number(discountAmount) - discountTarget.paid_amount))}</strong></p>}</div><div className="form-actions"><button type="submit" className="btn btn-primary" disabled={savingDiscount}>{savingDiscount ? 'Applying...' : '✓ Apply Discount'}</button><button type="button" className="btn btn-secondary" onClick={() => setDiscountModal(false)}>Cancel</button></div></form>
       </div></div>}
 
-      {historyModal && historyTarget && <div className="modal-overlay"><div className="modal" style={{ maxWidth: 580 }}>
-        <div className="modal-header"><h2 className="modal-title">📋 Payment History</h2><button className="modal-close" onClick={() => setHistoryModal(false)}><FiX /></button></div>
-        <div style={{ marginBottom: 16, padding: '10px 14px', background: 'rgba(99,102,241,0.08)', borderRadius: 8 }}><div style={{ fontWeight: 700 }}>{historyTarget.full_name} — {historyTarget.student_code}</div><div style={{ fontSize: 12, marginTop: 4 }}>Period: <strong>{displayDate(historyTarget.period_from)} - {displayDate(historyTarget.period_to)}</strong> · Paid: <strong style={{ color: '#10b981' }}>{fmt(historyTarget.paid_amount)}</strong></div></div>
-        {loadingHistory ? <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)' }}>Loading...</div> : payments.length === 0 ? <div className="empty-state" style={{ padding: 30 }}>No payments for this period.</div> : <div className="table-container"><table><thead><tr><th>Date</th><th>Amount</th><th>Method</th><th>Reference</th><th>Recorded By</th></tr></thead><tbody>{payments.map(p => <tr key={p.id}><td>{displayDate(p.payment_date)}</td><td style={{ fontWeight: 700, color: '#10b981' }}>{fmt(p.amount)}</td><td>{p.payment_method}</td><td>{p.reference || '—'}</td><td>{p.recorded_by_name || '—'}</td></tr>)}</tbody></table></div>}
-        <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}><button className="btn btn-secondary" onClick={() => setHistoryModal(false)}>Close</button></div>
+      {historyModal && historyTarget && <div className="modal-overlay" onClick={() => setHistoryModal(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 1040, width: 'min(1040px, 96vw)', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+        <div className="modal-header"><h2 className="modal-title">📋 Student Hostel Fee &amp; Payment History</h2><button className="modal-close" onClick={() => setHistoryModal(false)}><FiX /></button></div>
+        {!loadingHistory && hostelHistory && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, flexShrink: 0 }}>
+          {hostelHistory.active_schedule && <button className="btn btn-primary" type="button" onClick={startRevision}>✏️ Edit Future Fees</button>}
+          {!hostelHistory.active_schedule && <button className="btn btn-primary" type="button" onClick={startNewScheduleFromHistory}>Create New Fee Schedule</button>}
+          {(hostelHistory.active_schedule || hostelHistory.periods.length > 0 || hostelHistory.payments.length > 0 || hostelHistory.revisions.length > 0) && <button className="btn btn-danger" type="button" onClick={deleteFeeSchedule}>Delete All Fee &amp; Payment History</button>}
+        </div>}
+        <div style={{ marginBottom: 12, padding: '10px 14px', background: 'rgba(99,102,241,0.08)', borderRadius: 8, flexShrink: 0 }}><div style={{ fontWeight: 700 }}>{historyTarget.full_name} — {historyTarget.student_code}</div><div style={{ fontSize: 12, marginTop: 4 }}>Course: <strong>{historyTarget.course_name || '—'}</strong> · Joining: <strong>{displayDate(historyTarget.joining_date)}</strong>{hostelHistory?.active_schedule && <> · Schedule: <strong>{monthLabel(monthValue(new Date(`${hostelHistory.active_schedule.start_date}T00:00:00`)))} – {monthLabel(monthAfterDate(hostelHistory.active_schedule.end_date))}</strong></>} · Fee periods: <strong>{hostelHistory?.summary.months ?? '—'} months</strong></div></div>
+        {loadingHistory ? <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)' }}>Loading complete history...</div> : !hostelHistory ? <div className="empty-state" style={{ padding: 30 }}>History could not be loaded.</div> : <div style={{ overflowY: 'auto', minHeight: 0, paddingRight: 4 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 16 }}>
+            {[{ label: 'Total Scheduled Fee', value: fmt(hostelHistory.summary.total_fee), color: '#f59e0b' }, { label: 'Total Paid', value: fmt(hostelHistory.summary.total_paid), color: '#10b981' }, { label: 'Remaining Balance', value: fmt(hostelHistory.summary.total_pending), color: hostelHistory.summary.total_pending > 0 ? '#ef4444' : '#10b981' }].map(card => <div key={card.label} style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-secondary, rgba(255,255,255,0.04))', border: '1px solid var(--border-light)' }}><div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 5 }}>{card.label}</div><div style={{ fontSize: 18, fontWeight: 800, color: card.color }}>{card.value}</div></div>)}
+          </div>
+          <h3 style={{ fontSize: 14, margin: '4px 0 8px' }}>Monthly Fee Schedule</h3>
+          {hostelHistory.periods.length === 0 ? <div className="empty-state" style={{ padding: 18 }}>No fee periods saved yet.</div> : <div className="table-container" style={{ maxHeight: 280, overflow: 'auto', marginBottom: 18 }}><table><thead><tr><th>Month / Period</th><th>Hostel</th><th>Mess</th><th>Total Fee</th><th>Paid</th><th>Pending</th><th>Status</th></tr></thead><tbody>{hostelHistory.periods.map(period => { const month = monthLabel(monthValue(new Date(`${period.period_from}T00:00:00`))); const cleared = period.pending_balance <= 0; return <tr key={period.period_id}><td><strong>{month}</strong><div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{displayDate(period.period_from)} – {displayDate(period.period_to)}</div></td><td>{fmt(period.hostel_fee)}</td><td>{fmt(period.mess_fee)}</td><td style={{ fontWeight: 700 }}>{fmt(Math.max(0, period.total_fee - period.discount))}{period.discount > 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Discount {fmt(period.discount)}</div>}</td><td style={{ color: '#10b981', fontWeight: 700 }}>{fmt(period.paid_amount)}</td><td style={{ color: period.pending_balance > 0 ? '#ef4444' : '#10b981', fontWeight: 700 }}>{fmt(period.pending_balance)}</td><td><span style={{ color: cleared ? '#10b981' : period.paid_amount > 0 ? '#f59e0b' : '#ef4444', fontSize: 11, fontWeight: 700 }}>{cleared ? 'PAID' : period.paid_amount > 0 ? 'PARTIAL' : 'PENDING'}</span></td></tr>; })}</tbody></table></div>}
+          <h3 style={{ fontSize: 14, margin: '4px 0 8px' }}>Fee Change History</h3>
+          {hostelHistory.revisions.length === 0 ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 0 14px' }}>No fee revisions recorded by the new history tracker yet. Existing monthly rates remain visible above.</div> : <div className="table-container" style={{ maxHeight: 180, overflow: 'auto', marginBottom: 18 }}><table><thead><tr><th>Effective From</th><th>Effective To</th><th>Previous Monthly Total</th><th>New Monthly Total</th><th>Changed By</th><th>Notes</th></tr></thead><tbody>{hostelHistory.revisions.map(rev => <tr key={rev.id}><td>{displayDate(rev.effective_from)}</td><td>{displayDate(rev.effective_to)}</td><td>{rev.previous_hostel_fee == null || rev.previous_mess_fee == null ? '—' : fmt(rev.previous_hostel_fee + rev.previous_mess_fee)}</td><td style={{ color: '#f59e0b', fontWeight: 700 }}>{fmt(rev.new_hostel_fee + rev.new_mess_fee)}</td><td>{rev.changed_by_name || '—'}</td><td>{rev.notes || '—'}</td></tr>)}</tbody></table></div>}
+          <h3 style={{ fontSize: 14, margin: '4px 0 8px' }}>Payment Transactions</h3>
+          {hostelHistory.payments.length === 0 ? <div className="empty-state" style={{ padding: 18 }}>No payments recorded for this student yet.</div> : <div className="table-container" style={{ maxHeight: 200, overflow: 'auto', marginBottom: 12 }}><table><thead><tr><th>Payment Date</th><th>Fee Month</th><th>Amount</th><th>Method</th><th>Reference</th><th>Recorded By</th></tr></thead><tbody>{hostelHistory.payments.map(payment => <tr key={payment.id}><td>{displayDate(payment.payment_date)}</td><td>{payment.period_from ? monthLabel(monthValue(new Date(`${payment.period_from}T00:00:00`))) : '—'}</td><td style={{ fontWeight: 700, color: '#10b981' }}>{fmt(payment.amount)}</td><td>{payment.payment_method}</td><td>{payment.reference || '—'}</td><td>{payment.recorded_by_name || '—'}</td></tr>)}</tbody></table></div>}
+        </div>}
+        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}><button className="btn btn-secondary" onClick={() => setHistoryModal(false)}>Close</button></div>
       </div></div>}
 
 

@@ -32,12 +32,10 @@ const reportMonthLabel = (value: string) => {
   return new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 };
 const currentAcademicStart = (d = new Date()) => d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
-const academicYears = () => {
-  const current = currentAcademicStart();
-  return Array.from({ length: Math.max(3, current - 2025 + 2) }, (_, i) => 2025 + i);
-};
-const academicLabel = (year: number) => `${year}-${year + 1}`;
-const reportMonthsForYear = (year: number) => Array.from({ length: 12 }, (_, i) => reportMonthValue(new Date(year, 3 + i, 1)));
+const academicYears = () => [2025, 2026];
+const academicLabel = (year: number) => `${year}-${year + 2}`;
+// A two-year academic period contains 24 monthly periods, April through March two years later.
+const reportMonthsForYear = (year: number) => Array.from({ length: 24 }, (_, i) => reportMonthValue(new Date(year, 3 + i, 1)));
 
 const CourseCell = ({ r }: { r: any }) => (
   <div className="report-course-cell">

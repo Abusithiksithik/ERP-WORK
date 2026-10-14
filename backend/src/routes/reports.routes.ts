@@ -23,10 +23,11 @@ const reportMonthPeriod = (value: unknown): { from: string; to: string } => {
 router.use(authorize('super_admin', 'admin'));
 
 const academicYearRange = (value: unknown): { from: string; to: string; startYear: number } => {
+  // Reports use fixed two-year academic periods: 2025-2027 and 2026-2028.
   const parsed = Number(value);
-  const current = new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1;
-  const startYear = Number.isInteger(parsed) && parsed >= 2025 && parsed <= current + 2 ? parsed : current;
-  return { from: `${startYear}-04-01`, to: `${startYear + 1}-03-31`, startYear };
+  const startYear = parsed === 2025 || parsed === 2026 ? parsed : (new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1);
+  const safeStartYear = startYear === 2025 || startYear === 2026 ? startYear : 2026;
+  return { from: `${safeStartYear}-04-01`, to: `${safeStartYear + 2}-03-31`, startYear: safeStartYear };
 };
 
 
@@ -110,17 +111,17 @@ router.get('/hostel', async (req: AuthRequest, res: Response) => {
         COALESCE(fp.mess_fee,0)::numeric AS mess_fee,
         (COALESCE(fp.hostel_fee,0)+COALESCE(fp.mess_fee,0))::numeric AS total_fee,
         COALESCE(fp.discount,0)::numeric AS discount,
-        COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp WHERE hp.period_id=fp.id),0)::numeric AS amount_paid,
+        COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp WHERE hp.period_id=fp.id OR (hp.period_id IS NULL AND hp.hostel_record_id=hr.id AND hp.payment_date BETWEEN fp.start_date AND fp.end_date)),0)::numeric AS amount_paid,
         GREATEST(
           COALESCE(fp.hostel_fee,0)+COALESCE(fp.mess_fee,0)-COALESCE(fp.discount,0)
-          -COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp WHERE hp.period_id=fp.id),0),
+          -COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp WHERE hp.period_id=fp.id OR (hp.period_id IS NULL AND hp.hostel_record_id=hr.id AND hp.payment_date BETWEEN fp.start_date AND fp.end_date)),0),
           0
         )::numeric AS balance_due
       FROM hostel_records hr
       JOIN students s ON s.id=hr.student_id
       LEFT JOIN courses c ON c.id=s.course_id
       LEFT JOIN batches b ON b.id=s.batch_id
-      LEFT JOIN LATERAL (
+      JOIN LATERAL (
         SELECT hfp.* FROM hostel_fee_periods hfp
         WHERE hfp.hostel_record_id=hr.id
           AND hfp.start_date=$1::date
