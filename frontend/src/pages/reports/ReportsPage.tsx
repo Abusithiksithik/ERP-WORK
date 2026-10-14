@@ -31,10 +31,13 @@ const reportMonthLabel = (value: string) => {
   const [year, month] = value.split('-').map(Number);
   return new Date(year, month - 1, 1).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 };
-const reportMonthOptions = () => {
-  const now = new Date();
-  return Array.from({ length: 85 }, (_, i) => reportMonthValue(new Date(now.getFullYear(), now.getMonth() - 36 + i, 1)));
+const currentAcademicStart = (d = new Date()) => d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1;
+const academicYears = () => {
+  const current = currentAcademicStart();
+  return Array.from({ length: Math.max(3, current - 2025 + 2) }, (_, i) => 2025 + i);
 };
+const academicLabel = (year: number) => `${year}-${year + 1}`;
+const reportMonthsForYear = (year: number) => Array.from({ length: 12 }, (_, i) => reportMonthValue(new Date(year, 3 + i, 1)));
 
 const CourseCell = ({ r }: { r: any }) => (
   <div className="report-course-cell">
@@ -94,12 +97,13 @@ const ReportsPage: React.FC = () => {
   const [type, setType] = useState<ReportType>('enrollment');
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reportYear, setReportYear] = useState(currentAcademicStart());
   const [hostelMonth, setHostelMonth] = useState(reportMonthValue(new Date()));
 
   const load = async () => {
     setLoading(true);
     try {
-      const r = await api.get(endpoints[type], type === 'hostel' ? { params: { period_month: hostelMonth } } : undefined);
+      const r = await api.get(endpoints[type], { params: type === 'hostel' ? { year: reportYear, period_month: hostelMonth } : { year: reportYear } });
       setRows(r.data.data || []);
     } catch (err: any) {
       toast.error(err.response?.data?.message || `Failed to load ${labels[type]}`);
@@ -107,7 +111,7 @@ const ReportsPage: React.FC = () => {
     } finally { setLoading(false); }
   };
 
-  useEffect(() => { load(); }, [type, hostelMonth]);
+  useEffect(() => { load(); }, [type, reportYear, hostelMonth]);
 
   const totals = useMemo(() => {
     const sum = (k: string) => rows.reduce((a, r) => a + Number(r[k] || 0), 0);
@@ -158,21 +162,25 @@ const ReportsPage: React.FC = () => {
     <div className="card report-selector">
       {(['enrollment', 'hostel', 'exam-fee', 'uniform'] as ReportType[]).map(t => <button key={t} className={`report-type-btn ${type === t ? 'active' : ''}`} onClick={() => setType(t)}><FiFileText /> {labels[t]}</button>)}
     </div>
-    {type === 'hostel' && (
-      <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
-        <div className="form-group" style={{ margin: 0, minWidth: 220 }}>
-          <label className="form-label">Hostel Monthly Period</label>
-          <select className="form-control" value={hostelMonth} onChange={e => setHostelMonth(e.target.value)}>
-            {reportMonthOptions().map(month => <option key={month} value={month}>{reportMonthLabel(month)}</option>)}
-          </select>
-        </div>
-        <div style={{ fontSize: 12, color: 'var(--text-muted)', paddingBottom: 10 }}>
-          Monthly report: <strong>{reportMonthLabel(hostelMonth)}</strong>
-        </div>
+    <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
+      <div className="form-group" style={{ margin: 0, minWidth: 220 }}>
+        <label className="form-label">{type === 'hostel' ? 'Hostel Academic Year' : 'Academic Year'}</label>
+        <select className="form-control" value={reportYear} onChange={e => { const year = Number(e.target.value); setReportYear(year); setHostelMonth(reportMonthValue(new Date(year, 3, 1))); }}>
+          {academicYears().map(year => <option key={year} value={year}>{academicLabel(year)}</option>)}
+        </select>
       </div>
-    )}
+      {type === 'hostel' && <div className="form-group" style={{ margin: 0, minWidth: 220 }}>
+        <label className="form-label">Month</label>
+        <select className="form-control" value={hostelMonth} onChange={e => setHostelMonth(e.target.value)}>
+          {reportMonthsForYear(reportYear).map(month => <option key={month} value={month}>{reportMonthLabel(month)}</option>)}
+        </select>
+      </div>}
+      <div style={{ fontSize: 12, color: 'var(--text-muted)', paddingBottom: 10 }}>
+        Selected period: <strong>{academicLabel(reportYear)}{type === 'hostel' ? ` · ${reportMonthLabel(hostelMonth)}` : ''}</strong>
+      </div>
+    </div>
     <div className="card report-print-area">
-      <div className="report-title-row"><div><h2>{labels[type]}</h2><p>Generated from current ERP data · {type === 'hostel' ? reportMonthLabel(hostelMonth) : new Date().toLocaleDateString('en-IN')}</p></div><div className="report-actions"><button className="btn btn-secondary" onClick={exportCsv} disabled={!rows.length}><FiDownload /> Export CSV</button><button className="btn btn-secondary" onClick={() => window.print()} disabled={!rows.length}><FiPrinter /> Print</button></div></div>
+      <div className="report-title-row"><div><h2>{labels[type]}</h2><p>Generated from current ERP data · {type === 'hostel' ? `${academicLabel(reportYear)} · ${reportMonthLabel(hostelMonth)}` : academicLabel(reportYear)}</p></div><div className="report-actions"><button className="btn btn-secondary" onClick={exportCsv} disabled={!rows.length}><FiDownload /> Export CSV</button><button className="btn btn-secondary" onClick={() => window.print()} disabled={!rows.length}><FiPrinter /> Print</button></div></div>
       <div className={`report-summary ${type === 'uniform' ? 'uniform-report-summary' : ''}`}>{totals.map(([k, v]) => <div className="report-summary-card" key={String(k)}><span>{k}</span><strong>{v}</strong></div>)}</div>
       {loading ? <div className="empty-state">Loading report…</div> : rows.length === 0 ? <div className="empty-state"><h3>No data</h3><p>No records are available for this report.</p></div> : <div className="report-table-wrap">{table}</div>}
     </div>

@@ -22,7 +22,15 @@ const reportMonthPeriod = (value: unknown): { from: string; to: string } => {
 };
 router.use(authorize('super_admin', 'admin'));
 
-router.get('/course', async (_req: AuthRequest, res: Response) => {
+const academicYearRange = (value: unknown): { from: string; to: string; startYear: number } => {
+  const parsed = Number(value);
+  const current = new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1;
+  const startYear = Number.isInteger(parsed) && parsed >= 2025 && parsed <= current + 2 ? parsed : current;
+  return { from: `${startYear}-04-01`, to: `${startYear + 1}-03-31`, startYear };
+};
+
+
+router.get('/course', async (req: AuthRequest, res: Response) => {
   try {
     const result = await query(`
       SELECT
@@ -36,8 +44,9 @@ router.get('/course', async (_req: AuthRequest, res: Response) => {
       LEFT JOIN courses c ON c.id=s.course_id
       LEFT JOIN batches b ON b.id=s.batch_id
       WHERE s.status != 'discontinued'
+        AND COALESCE(s.admission_date, s.created_at::date) BETWEEN $1::date AND $2::date
       ORDER BY s.created_at DESC
-    `);
+    `, [academicYearRange(req.query.year).from, academicYearRange(req.query.year).to]);
     res.json({ success: true, data: result.rows });
   } catch (err) {
     console.error('GET /reports/course error:', err);
@@ -45,7 +54,7 @@ router.get('/course', async (_req: AuthRequest, res: Response) => {
   }
 });
 
-router.get('/enrollment', async (_req: AuthRequest, res: Response) => {
+router.get('/enrollment', async (req: AuthRequest, res: Response) => {
   try {
     const result = await query(`
       SELECT
@@ -69,8 +78,9 @@ router.get('/enrollment', async (_req: AuthRequest, res: Response) => {
       LEFT JOIN courses c ON c.id=e.course_id
       LEFT JOIN course_categories cc ON cc.id=c.category_id
       LEFT JOIN batches b ON b.id=e.batch_id
+      WHERE COALESCE(e.enrolled_at::date, s.admission_date, s.created_at::date) BETWEEN $1::date AND $2::date
       ORDER BY e.enrolled_at DESC, e.id DESC
-    `);
+    `, [academicYearRange(req.query.year).from, academicYearRange(req.query.year).to]);
     res.json({ success: true, data: result.rows });
   } catch (err) {
     console.error('GET /reports/enrollment error:', err);
@@ -81,6 +91,11 @@ router.get('/enrollment', async (_req: AuthRequest, res: Response) => {
 router.get('/hostel', async (req: AuthRequest, res: Response) => {
   try {
     const { from, to } = reportMonthPeriod(req.query.period_month);
+    const academic = academicYearRange(req.query.year);
+    if (from < academic.from || from > academic.to) {
+      res.status(400).json({ success: false, message: 'Selected month must belong to the selected academic year' });
+      return;
+    }
     const result = await query(`
       SELECT
         hr.id AS hostel_record_id,
@@ -123,7 +138,7 @@ router.get('/hostel', async (req: AuthRequest, res: Response) => {
   }
 });
 
-router.get('/exam-fee', async (_req: AuthRequest, res: Response) => {
+router.get('/exam-fee', async (req: AuthRequest, res: Response) => {
   try {
     const result = await query(`
       SELECT
@@ -140,8 +155,9 @@ router.get('/exam-fee', async (_req: AuthRequest, res: Response) => {
       LEFT JOIN courses c ON c.id=s.course_id
       LEFT JOIN batches b ON b.id=s.batch_id
       WHERE s.status != 'discontinued'
+        AND COALESCE(s.admission_date, s.created_at::date) BETWEEN $1::date AND $2::date
       ORDER BY s.full_name ASC
-    `);
+    `, [academicYearRange(req.query.year).from, academicYearRange(req.query.year).to]);
     res.json({ success: true, data: result.rows });
   } catch (err) {
     console.error('GET /reports/exam-fee error:', err);
@@ -149,7 +165,7 @@ router.get('/exam-fee', async (_req: AuthRequest, res: Response) => {
   }
 });
 
-router.get('/uniform', async (_req: AuthRequest, res: Response) => {
+router.get('/uniform', async (req: AuthRequest, res: Response) => {
   try {
     const result = await query(`
       SELECT
@@ -174,11 +190,12 @@ router.get('/uniform', async (_req: AuthRequest, res: Response) => {
       LEFT JOIN courses c ON c.id=s.course_id
       LEFT JOIN batches b ON b.id=s.batch_id
       WHERE s.status != 'discontinued'
+        AND COALESCE(s.admission_date, s.created_at::date) BETWEEN $1::date AND $2::date
         AND (su.status = 'received' OR s.uniform_received = true OR EXISTS (
           SELECT 1 FROM payments p WHERE p.student_id=s.id AND p.payment_type='uniform' AND p.status='verified'
         ))
       ORDER BY s.full_name ASC
-    `);
+    `, [academicYearRange(req.query.year).from, academicYearRange(req.query.year).to]);
     res.json({ success: true, data: result.rows });
   } catch (err) {
     console.error('GET /reports/uniform error:', err);
