@@ -59,8 +59,10 @@ app.use(cors({
   credentials: true,
 }));
 app.use(morgan('dev'));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Keep API payload limits modest to reduce memory pressure and oversized-body abuse.
+// File uploads use Multer on their own routes and are not handled by these parsers.
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb', parameterLimit: 1000 }));
 
 // Static uploads
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
@@ -115,7 +117,8 @@ app.use((_req, res) => {
 // Error handler
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err.stack);
-  res.status(500).json({ success: false, message: err.message || 'Internal Server Error' });
+  const message = isProduction ? 'Internal Server Error' : (err.message || 'Internal Server Error');
+  res.status(500).json({ success: false, message });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -268,6 +271,7 @@ const initDb = async () => {
     { name: 'migrate_v20', file: 'migrate_v20.sql' },
     { name: 'migrate_v21', file: 'migrate_v21.sql' },
     { name: 'migrate_v22', file: 'migrate_v22.sql' },
+    { name: 'migrate_v23', file: 'migrate_v23.sql' },
   ];
 
   for (const m of migrations) {

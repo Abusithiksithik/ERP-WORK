@@ -285,6 +285,7 @@ const HostelList: React.FC = () => {
   const [historyTarget, setHistoryTarget] = useState<HostelStudent | null>(null);
   const [hostelHistory, setHostelHistory] = useState<HostelHistory | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [deletingHistory, setDeletingHistory] = useState(false);
 
 
 
@@ -590,15 +591,24 @@ const HostelList: React.FC = () => {
     const confirmed = window.confirm(
       `Permanently delete ALL hostel fee data for ${historyTarget.full_name} (${historyTarget.student_code})? This removes every hostel fee period, fee schedule, fee revision, and hostel payment transaction for this student. This cannot be undone.`
     );
-    if (!confirmed) return;
+    if (!confirmed || deletingHistory) return;
+    setDeletingHistory(true);
     try {
       const response = await api.delete(`/hostel/${historyTarget.hostel_record_id}/history`);
       const removed = response.data?.data || {};
+      // Update the open modal immediately instead of issuing another history GET
+      // for data that the server has just confirmed was deleted.
+      setHostelHistory({
+        active_schedule: null,
+        summary: { months: 0, total_fee: 0, total_paid: 0, total_pending: 0 },
+        periods: [], payments: [], revisions: [],
+      });
       toast.success(`Hostel fee history cleared. ${toNum(removed.periods_removed)} periods and ${toNum(removed.payments_removed)} payments deleted.`);
-      await openHistory(historyTarget);
       await load();
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to clear hostel fee history');
+    } finally {
+      setDeletingHistory(false);
     }
   };
 
@@ -751,7 +761,7 @@ const HostelList: React.FC = () => {
         {!loadingHistory && hostelHistory && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12, flexShrink: 0 }}>
           {hostelHistory.active_schedule && <button className="btn btn-primary" type="button" onClick={startRevision}>✏️ Edit Future Fees</button>}
           {!hostelHistory.active_schedule && <button className="btn btn-primary" type="button" onClick={startNewScheduleFromHistory}>Create New Fee Schedule</button>}
-          {(hostelHistory.active_schedule || hostelHistory.periods.length > 0 || hostelHistory.payments.length > 0 || hostelHistory.revisions.length > 0) && <button className="btn btn-danger" type="button" onClick={deleteFeeSchedule}>Delete All Fee &amp; Payment History</button>}
+          {(hostelHistory.active_schedule || hostelHistory.periods.length > 0 || hostelHistory.payments.length > 0 || hostelHistory.revisions.length > 0) && <button className="btn btn-danger" type="button" onClick={deleteFeeSchedule} disabled={deletingHistory}>{deletingHistory ? 'Deleting...' : 'Delete All Fee & Payment History'}</button>}
         </div>}
         <div style={{ marginBottom: 12, padding: '10px 14px', background: 'rgba(99,102,241,0.08)', borderRadius: 8, flexShrink: 0 }}><div style={{ fontWeight: 700 }}>{historyTarget.full_name} — {historyTarget.student_code}</div><div style={{ fontSize: 12, marginTop: 4 }}>Course: <strong>{historyTarget.course_name || '—'}</strong> · Joining: <strong>{displayDate(historyTarget.joining_date)}</strong>{hostelHistory?.active_schedule && <> · Schedule: <strong>{monthLabel(monthValue(new Date(`${hostelHistory.active_schedule.start_date}T00:00:00`)))} – {monthLabel(monthAfterDate(hostelHistory.active_schedule.end_date))}</strong></>} · Fee periods: <strong>{hostelHistory?.summary.months ?? '—'} months</strong></div></div>
         {loadingHistory ? <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)' }}>Loading complete history...</div> : !hostelHistory ? <div className="empty-state" style={{ padding: 30 }}>History could not be loaded.</div> : <div style={{ overflowY: 'auto', minHeight: 0, paddingRight: 4 }}>

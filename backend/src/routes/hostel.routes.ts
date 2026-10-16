@@ -654,7 +654,9 @@ router.put('/:id/revision', authorize('super_admin', 'admin'), async (req: AuthR
     }
     const student = studentResult.rows[0];
     const scheduleResult = await client.query(
-      `SELECT start_date, end_date FROM hostel_fee_schedules
+      `SELECT TO_CHAR(start_date, 'YYYY-MM-DD') AS start_date,
+              TO_CHAR(end_date, 'YYYY-MM-DD') AS end_date
+       FROM hostel_fee_schedules
        WHERE hostel_record_id=$1 AND deleted_at IS NULL
        ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, [id]
     );
@@ -665,19 +667,47 @@ router.put('/:id/revision', authorize('super_admin', 'admin'), async (req: AuthR
     }
     const fixedSchedule = scheduleResult.rows[0];
     const fromDate = new Date(`${from}T00:00:00Z`);
-    const toDate = new Date(`${to}T00:00:00Z`);
     const startIndex = fromDate.getUTCFullYear() * 12 + fromDate.getUTCMonth();
-    const rawEndIndex = toDate.getUTCFullYear() * 12 + toDate.getUTCMonth();
-    const endIndex = rawEndIndex - (toDate.getUTCDate() <= fromDate.getUTCDate() ? 1 : 0);
-    const scheduleStartDate = new Date(String(fixedSchedule.start_date).slice(0, 10) + 'T00:00:00Z');
-    const scheduleEndDate = new Date(String(fixedSchedule.end_date).slice(0, 10) + 'T00:00:00Z');
-    const scheduleStartIndex = scheduleStartDate.getUTCFullYear() * 12 + scheduleStartDate.getUTCMonth();
-    const scheduleEndIndex = scheduleEndDate.getUTCFullYear() * 12 + scheduleEndDate.getUTCMonth();
-    if (startIndex < scheduleStartIndex || endIndex !== scheduleEndIndex) {
+
+    // Use explicit YYYY-MM strings from PostgreSQL. Depending on the configured
+    // pg date parser, DATE columns can arrive as Date objects; String(Date).slice(0,10)
+    // is not ISO and caused valid months (for example November 2026) to be rejected.
+    // The saved schedule is the immutable source of truth. Its end_date can be
+    // either the last day of the final charged month (new schedules) or the first
+    // day of the following month (legacy exclusive-end schedules).
+    const scheduleBounds = await client.query(
+      `SELECT TO_CHAR(MIN(start_date), 'YYYY-MM') AS first_period_month,
+              TO_CHAR(MAX(start_date), 'YYYY-MM') AS last_period_month
+       FROM hostel_fee_periods WHERE hostel_record_id=$1`, [id]
+    );
+    const bounds = scheduleBounds.rows[0];
+    const monthIndex = (value: unknown): number | null => {
+      if (!value) return null;
+      const match = String(value).match(/^(\d{4})-(\d{2})/);
+      if (!match) return null;
+      const year = Number(match[1]), month = Number(match[2]);
+      if (month < 1 || month > 12) return null;
+      return year * 12 + month - 1;
+    };
+    const firstPeriodIndex = monthIndex(bounds?.first_period_month);
+    const lastPeriodIndex = monthIndex(bounds?.last_period_month);
+    const scheduleStartIndex = monthIndex(fixedSchedule.start_date) ?? firstPeriodIndex;
+    const rawScheduleEndIndex = monthIndex(fixedSchedule.end_date);
+    const endDateDay = Number(String(fixedSchedule.end_date ?? '').slice(8, 10));
+    const normalizedScheduleEndIndex = rawScheduleEndIndex == null
+      ? null
+      : (endDateDay === 1 ? rawScheduleEndIndex - 1 : rawScheduleEndIndex);
+    // Prefer the stored schedule boundary, falling back to existing monthly rows
+    // only for legacy records whose schedule boundary cannot be parsed.
+    const scheduleEndIndex = normalizedScheduleEndIndex ?? lastPeriodIndex;
+    if (scheduleStartIndex == null || scheduleEndIndex == null || startIndex < scheduleStartIndex || startIndex > scheduleEndIndex) {
       await client.query('ROLLBACK');
-      res.status(400).json({ success: false, code: 'FIXED_SCHEDULE_RANGE', message: 'The course end month is fixed. Select a fee increase month within the existing schedule; the end month cannot be changed.' });
+      res.status(400).json({ success: false, code: 'FIXED_SCHEDULE_RANGE', message: 'Choose a fee increase month within the existing schedule. The course end month stays fixed.' });
       return;
     }
+    // Always revise through the existing final charged month; never extend or
+    // shorten the schedule based on a client-submitted end date.
+    const endIndex = scheduleEndIndex;
     const joining = new Date(String(student.joining_date).slice(0, 10) + 'T00:00:00Z');
     const courseStart = joining.getUTCFullYear() * 12 + joining.getUTCMonth();
     const courseEnd = courseStart + durationInMonths(student.course_duration) - 1;
@@ -767,10 +797,12 @@ router.delete('/:id/history', authorize('super_admin', 'admin'), async (req: Aut
       res.status(404).json({ success: false, message: 'Hostel record not found' });
       return;
     }
-    const payments = await client.query('DELETE FROM hostel_payments WHERE hostel_record_id=$1 RETURNING id', [id]);
-    const revisions = await client.query('DELETE FROM hostel_fee_revisions WHERE hostel_record_id=$1 RETURNING id', [id]);
-    const periods = await client.query('DELETE FROM hostel_fee_periods WHERE hostel_record_id=$1 RETURNING id', [id]);
-    const schedules = await client.query('DELETE FROM hostel_fee_schedules WHERE hostel_record_id=$1 RETURNING id', [id]);
+    // Avoid RETURNING every deleted row: a student may have many monthly periods
+    // and payments, and serializing all deleted IDs adds unnecessary latency.
+    const payments = await client.query('DELETE FROM hostel_payments WHERE hostel_record_id=$1', [id]);
+    const revisions = await client.query('DELETE FROM hostel_fee_revisions WHERE hostel_record_id=$1', [id]);
+    const periods = await client.query('DELETE FROM hostel_fee_periods WHERE hostel_record_id=$1', [id]);
+    const schedules = await client.query('DELETE FROM hostel_fee_schedules WHERE hostel_record_id=$1', [id]);
     await client.query('UPDATE hostel_records SET hostel_fee=0, mess_fee=0 WHERE id=$1', [id]);
     await client.query('COMMIT');
     res.json({
