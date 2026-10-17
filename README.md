@@ -2,14 +2,14 @@
 
 ## Local development
 
-1. Create `backend/.env` with PostgreSQL settings.
+1. Copy `backend/.env.example` to `backend/.env` and fill in your local PostgreSQL settings and a private JWT secret.
 2. Install dependencies:
    - `cd backend && npm install`
    - `cd ../frontend && npm install`
 3. Start backend: `npm run dev` (default port 5007).
 4. Start frontend: `npm run dev` (default port 5123).
 
-The backend runs `schema.sql` plus tracked migrations `v2` through `v13` automatically at startup. Do **not** manually run migration files against an already-managed database unless you are intentionally repairing a database.
+The backend runs `schema.sql` plus the tracked migrations configured in `backend/src/index.ts` automatically at startup. Do **not** manually run migration files against an already-managed database unless you are intentionally repairing a database.
 
 ## Production
 

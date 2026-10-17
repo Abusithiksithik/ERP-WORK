@@ -76,6 +76,19 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
     const periodFrom = selectedMonth?.from || dateValue(req.query.period_from) || new Date().toISOString().slice(0, 10);
     const periodTo = selectedMonth?.to || dateValue(req.query.period_to) || periodFrom;
 
+    // Repair older/missing hostel_records for students whose accommodation was
+    // changed to Hostel. This keeps admissions visible even when the record
+    // creation during an earlier edit failed or was skipped.
+    await query(`
+      INSERT INTO hostel_records (student_id, hostel_fee, mess_fee, paid_amount)
+      SELECT s.id, 0, 0, 0
+      FROM students s
+      WHERE LOWER(COALESCE(s.accommodation_type, '')) = 'hostel'
+        AND LOWER(COALESCE(s.status, '')) <> 'discontinued'
+        AND NOT EXISTS (SELECT 1 FROM hostel_records hr WHERE hr.student_id = s.id)
+      ON CONFLICT (student_id) DO NOTHING
+    `);
+
     let q = `
       SELECT
         hr.id AS hostel_record_id,
@@ -97,11 +110,30 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         COALESCE(fp.discount, 0)::numeric AS discount,
         COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp
           WHERE hp.hostel_record_id = hr.id AND (hp.period_id = fp.id OR (hp.period_id IS NULL AND hp.payment_date BETWEEN fp.start_date AND fp.end_date))), 0)::numeric AS paid_amount,
+        -- Show only the selected month's fee in total_fee, but carry any
+        -- unpaid balance from earlier fee months into pending_balance.
         GREATEST(
-          COALESCE(fp.hostel_fee, 0) + COALESCE(fp.mess_fee, 0)
-          - COALESCE(fp.discount, 0)
-          - COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp
-             WHERE hp.hostel_record_id = hr.id AND (hp.period_id = fp.id OR (hp.period_id IS NULL AND hp.payment_date BETWEEN fp.start_date AND fp.end_date))), 0),
+          COALESCE((SELECT SUM(GREATEST(COALESCE(fp_due.hostel_fee, 0) + COALESCE(fp_due.mess_fee, 0) - COALESCE(fp_due.discount, 0), 0))
+            FROM hostel_fee_periods fp_due
+            WHERE fp_due.hostel_record_id = hr.id
+              AND fp_due.start_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
+              AND fp_due.start_date <= $2::date), 0)
+          - COALESCE((SELECT SUM(hp_due.amount)
+            FROM hostel_payments hp_due
+            WHERE hp_due.hostel_record_id = hr.id
+              AND hp_due.payment_date <= $2::date
+              AND (
+                (hp_due.period_id IS NOT NULL AND EXISTS (
+                  SELECT 1 FROM hostel_fee_periods fp_paid
+                  WHERE fp_paid.id = hp_due.period_id
+                    AND fp_paid.hostel_record_id = hr.id
+                    AND fp_paid.start_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
+                    AND fp_paid.start_date <= $2::date
+                ))
+                OR (hp_due.period_id IS NULL
+                    AND hp_due.payment_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
+                    AND hp_due.payment_date <= $2::date)
+              )), 0),
           0
         )::numeric AS pending_balance,
         COALESCE(fp.notes, hr.notes) AS notes
@@ -113,14 +145,44 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         SELECT hfp.*
         FROM hostel_fee_periods hfp
         WHERE hfp.hostel_record_id = hr.id
-          AND hfp.start_date = $1::date
-          AND hfp.end_date = $2::date
-        ORDER BY hfp.id DESC
+          AND hfp.start_date <= $2::date
+          AND hfp.end_date > $1::date
+        ORDER BY (date_trunc('month', hfp.start_date) = date_trunc('month', $1::date)) DESC, hfp.start_date DESC, hfp.id DESC
         LIMIT 1
       ) fp ON TRUE
-      WHERE s.accommodation_type = 'hostel'
-        AND s.status NOT IN ('discontinued')
-        AND date_trunc('month', COALESCE(s.admission_date, s.created_at)::date) <= $1::date
+      WHERE LOWER(COALESCE(s.accommodation_type, '')) = 'hostel'
+        AND LOWER(COALESCE(s.status, '')) <> 'discontinued'
+        AND (
+          EXISTS (
+            SELECT 1 FROM hostel_fee_schedules fs
+            WHERE fs.hostel_record_id = hr.id
+              AND fs.deleted_at IS NULL
+              AND fs.start_date <= $2::date
+              AND fs.end_date > $1::date
+          )
+          OR EXISTS (
+            SELECT 1 FROM hostel_fee_periods hfp_month
+            WHERE hfp_month.hostel_record_id = hr.id
+              AND hfp_month.start_date <= $2::date
+              AND hfp_month.end_date > $1::date
+          )
+          OR (
+            -- Before a fee schedule exists, show the hostel student only in
+            -- their admission month. They must not roll into later months until
+            -- a schedule is created.
+            NOT EXISTS (
+              SELECT 1 FROM hostel_fee_schedules fs_unscheduled
+              WHERE fs_unscheduled.hostel_record_id = hr.id
+                AND fs_unscheduled.deleted_at IS NULL
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM hostel_fee_periods fp_unscheduled
+              WHERE fp_unscheduled.hostel_record_id = hr.id
+            )
+            AND date_trunc('month', COALESCE(s.admission_date, s.created_at::date))
+                = date_trunc('month', $1::date)
+          )
+        )
     `;
 
     const params: unknown[] = [periodFrom, periodTo];

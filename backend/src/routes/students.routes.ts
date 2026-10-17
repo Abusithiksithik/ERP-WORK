@@ -806,7 +806,7 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
          VALUES ($1, 0, 0, 0)
          ON CONFLICT (student_id) DO NOTHING`,
         [req.params.id]
-      ).catch(() => {/* non-critical */});
+      );
     }
 
     // Sync uniform status to student_uniform table for cross-page sync
