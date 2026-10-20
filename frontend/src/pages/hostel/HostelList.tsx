@@ -648,7 +648,7 @@ const HostelList: React.FC = () => {
         {[
           { label: 'Hostel Students', value: String(totalStudents), icon: '🏠', color: 'var(--accent)' },
           { label: 'Total Fee', value: fmt(totalFee), icon: '💰', color: '#f59e0b' },
-          { label: 'Total Paid', value: fmt(totalPaid), icon: '✅', color: '#10b981' },
+          { label: 'Total Paid (Till Month)', value: fmt(totalPaid), icon: '✅', color: '#10b981' },
           { label: 'Total Pending', value: fmt(totalPending), icon: '⏳', color: '#ef4444' },
         ].map(stat => (
           <div key={stat.label} className="card" style={{ padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>

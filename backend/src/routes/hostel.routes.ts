@@ -108,8 +108,20 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         COALESCE(fp.mess_fee, 0)::numeric AS mess_fee,
         (COALESCE(fp.hostel_fee, 0) + COALESCE(fp.mess_fee, 0))::numeric AS total_fee,
         COALESCE(fp.discount, 0)::numeric AS discount,
-        COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp
-          WHERE hp.hostel_record_id = hr.id AND (hp.period_id = fp.id OR (hp.period_id IS NULL AND hp.payment_date BETWEEN fp.start_date AND fp.end_date))), 0)::numeric AS paid_amount,
+        -- Cumulative paid through the selected month, matching the cumulative pending balance.
+        COALESCE((SELECT SUM(hp.amount)
+          FROM hostel_payments hp
+          WHERE hp.hostel_record_id = hr.id
+            AND hp.payment_date < ($2::date + INTERVAL '1 day')
+            AND (
+              (hp.period_id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM hostel_fee_periods fp_paid
+                WHERE fp_paid.id = hp.period_id
+                  AND fp_paid.hostel_record_id = hr.id
+                  AND fp_paid.start_date <= $2::date
+              ))
+              OR (hp.period_id IS NULL AND hp.payment_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date)
+            )), 0)::numeric AS paid_amount,
         -- Show only the selected month's fee in total_fee, but carry any
         -- unpaid balance from earlier fee months into pending_balance.
         GREATEST(
@@ -376,6 +388,48 @@ router.post('/:id/payments', authorize('super_admin', 'admin'), async (req: Auth
         res.status(400).json({ success: false, message: 'Selected fee period does not belong to this student. Refresh and choose the correct month.' });
         return;
       }
+
+      // Do not allow payment beyond all outstanding bills up to the selected period.
+      // Lock the student's fee record so two concurrent payments cannot exceed the balance.
+      await client.query('SELECT id FROM hostel_records WHERE id=$1 FOR UPDATE', [id]);
+      const dueResult = await client.query(
+        `SELECT
+           COALESCE(SUM(GREATEST(COALESCE(fp.hostel_fee,0) + COALESCE(fp.mess_fee,0) - COALESCE(fp.discount,0), 0)),0)::numeric AS billed,
+           COALESCE((SELECT SUM(hp.amount)
+             FROM hostel_payments hp
+             WHERE hp.hostel_record_id=$1
+               AND hp.payment_date < (fp_selected.start_date + INTERVAL '1 month')
+               AND (
+                 (hp.period_id IS NOT NULL AND EXISTS (
+                   SELECT 1 FROM hostel_fee_periods fp_paid
+                   WHERE fp_paid.id=hp.period_id
+                     AND fp_paid.hostel_record_id=$1
+                     AND fp_paid.start_date <= fp_selected.start_date
+                 ))
+                 OR (hp.period_id IS NULL AND hp.payment_date >= (
+                   SELECT COALESCE(MIN(fp_start.start_date), date_trunc('month', COALESCE(s.admission_date,s.created_at::date))::date)
+                   FROM hostel_fee_periods fp_start WHERE fp_start.hostel_record_id=$1
+                 ))
+               )),0)::numeric AS paid
+         FROM hostel_fee_periods fp
+         JOIN hostel_fee_periods fp_selected ON fp_selected.id=$2 AND fp_selected.hostel_record_id=fp.hostel_record_id
+         JOIN students s ON s.id=(SELECT student_id FROM hostel_records WHERE id=$1)
+         WHERE fp.hostel_record_id=$1 AND fp.start_date <= fp_selected.start_date
+         GROUP BY fp_selected.start_date`,
+        [id, selectedPeriodId]
+      );
+      const billedThroughSelected = Number(dueResult.rows[0]?.billed || 0);
+      const paidThroughSelected = Number(dueResult.rows[0]?.paid || 0);
+      const outstanding = Math.max(0, billedThroughSelected - paidThroughSelected);
+      if (amt > outstanding + 0.000001) {
+        await client.query('ROLLBACK');
+        res.status(400).json({
+          success: false,
+          message: `Payment exceeds the outstanding balance of ₹${outstanding.toLocaleString('en-IN')}. Record up to ₹${outstanding.toLocaleString('en-IN')} only.`
+        });
+        return;
+      }
+
       await client.query(
         `INSERT INTO hostel_payments
           (hostel_record_id, student_id, period_id, amount, payment_date, payment_method, reference, notes, recorded_by)
