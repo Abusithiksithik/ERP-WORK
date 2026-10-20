@@ -127,10 +127,24 @@ router.get('/hostel', async (req: AuthRequest, res: Response) => {
         COALESCE(fp.mess_fee,0)::numeric AS mess_fee,
         (COALESCE(fp.hostel_fee,0)+COALESCE(fp.mess_fee,0))::numeric AS total_fee,
         COALESCE(fp.discount,0)::numeric AS discount,
-        COALESCE((SELECT SUM(hp.amount) FROM hostel_payments hp
-          WHERE hp.hostel_record_id=hr.id AND (
-            hp.period_id=fp.id OR (hp.period_id IS NULL AND hp.payment_date BETWEEN $1::date AND $2::date)
-          )),0)::numeric AS amount_paid,
+        -- Match Hostel Management: cumulative payments through the selected month.
+        -- Period-linked payments count only when their fee period is due by this month;
+        -- legacy payments without a period_id are counted once by payment date.
+        COALESCE((SELECT SUM(hp.amount)
+          FROM hostel_payments hp
+          WHERE hp.hostel_record_id=hr.id
+            AND hp.payment_date <= $2::date
+            AND (
+              (hp.period_id IS NOT NULL AND EXISTS (
+                SELECT 1 FROM hostel_fee_periods fp_paid
+                WHERE fp_paid.id=hp.period_id
+                  AND fp_paid.hostel_record_id=hr.id
+                  AND fp_paid.start_date <= $2::date
+              ))
+              OR (hp.period_id IS NULL
+                  AND hp.payment_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
+                  AND hp.payment_date <= $2::date)
+            )),0)::numeric AS amount_paid,
         -- Report fee remains the selected month's charge; balance_due carries
         -- forward all unpaid scheduled fees through the selected month.
         GREATEST(
