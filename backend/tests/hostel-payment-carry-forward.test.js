@@ -14,3 +14,11 @@ assert.equal(canPay([10000, 10000], [8000], 12000), true);
 assert.equal(canPay([10000, 10000], [8000], 13000), false);
 assert.equal(balance([5000, 5000, 5000], [4000, 2000]), 9000);
 console.log('Hostel payment carry-forward regression examples: PASS');
+// Regression: a month's hostel and mess fees are combined before payment validation.
+assert.equal(balance([34000, 2000 + 2000], [34000]), 4000);
+assert.equal(canPay([34000, 2000 + 2000], [34000], 4000), true);
+assert.equal(canPay([34000, 2000 + 2000], [34000], 4001), false);
+// Previous payments reduce the cumulative outstanding balance; they do not reset per month.
+assert.equal(balance([18000], [15500]), 2500);
+assert.equal(canPay([18000], [15500], 2500), true);
+assert.equal(canPay([18000], [15500], 2501), false);

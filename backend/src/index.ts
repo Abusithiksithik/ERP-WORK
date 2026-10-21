@@ -250,41 +250,44 @@ const initDb = async () => {
     return;
   }
 
-  // ── 4. Versioned migrations (tracked — run each exactly once) ────────────
-  const migrations: Array<{ name: string; file: string }> = [
-    { name: 'migrate_v2', file: 'migrate_v2.sql' },
-    { name: 'migrate_v3', file: 'migrate_v3.sql' },
-    { name: 'migrate_v4', file: 'migrate_v4.sql' },
-    { name: 'migrate_v5', file: 'migrate_v5.sql' },
-    { name: 'migrate_v6', file: 'migrate_v6.sql' },
-    { name: 'migrate_v7', file: 'migrate_v7.sql' },
-    { name: 'migrate_v8', file: 'migrate_v8.sql' },
-    { name: 'migrate_v9', file: 'migrate_v9.sql' },
-    { name: 'migrate_v10', file: 'migrate_v10.sql' },
-    { name: 'migrate_v11', file: 'migrate_v11.sql' },
-    { name: 'migrate_v12', file: 'migrate_v12.sql' },
-    { name: 'migrate_v13', file: 'migrate_v13.sql' },
-    { name: 'migrate_v14', file: 'migrate_v14.sql' },
-    { name: 'migrate_v15', file: 'migrate_v15.sql' },
-    { name: 'migrate_v16', file: 'migrate_v16.sql' },
-    { name: 'migrate_v17', file: 'migrate_v17.sql' },
-    { name: 'migrate_v20', file: 'migrate_v20.sql' },
-    { name: 'migrate_v21', file: 'migrate_v21.sql' },
-    { name: 'migrate_v22', file: 'migrate_v22.sql' },
-    { name: 'migrate_v23', file: 'migrate_v23.sql' },
-  ];
+  // ── 4. Automatically discover and run versioned migrations ──────────────
+  // Files are sorted by version. Existing migration names stay stable, so
+  // runMigration() skips migrations already recorded in schema_migrations.
+  const databaseDir = path.join(__dirname, '../../database');
+  const migrations = fs.readdirSync(databaseDir)
+    .map((file) => {
+      // Supports migrate_v18.sql and named variants such as
+      // migrate_v18_hostel_monthly_delete.sql.
+      const match = file.match(/^migrate_v(\d+)(?:_([a-z0-9_-]+))?\.sql$/i);
+      if (!match) return null;
 
-  for (const m of migrations) {
+      const suffix = match[2] ? `_${match[2]}` : '';
+      return {
+        name: `migrate_v${match[1]}${suffix}`,
+        file,
+        version: Number(match[1]),
+        suffix: suffix.toLowerCase(),
+      };
+    })
+    .filter((migration): migration is {
+      name: string;
+      file: string;
+      version: number;
+      suffix: string;
+    } => migration !== null)
+    // For the same version, run the base file first, then named variants.
+    .sort((a, b) => a.version - b.version || a.suffix.localeCompare(b.suffix));
+
+  for (const migration of migrations) {
+    const filePath = path.join(databaseDir, migration.file);
     try {
-      const filePath = path.join(__dirname, '../../database', m.file);
-      if (!fs.existsSync(filePath)) {
-        console.log(`⚠️  Migration file ${m.file} not found — skipping`);
-        continue;
-      }
       const sql = fs.readFileSync(filePath, 'utf8');
-      await runMigration(m.name, sql);
+      await runMigration(migration.name, sql);
     } catch (err) {
-      console.error(`❌ Unexpected error preparing migration ${m.name}:`, err);
+      console.error(
+        `❌ Unexpected error preparing migration ${migration.name}:`,
+        err,
+      );
     }
   }
 

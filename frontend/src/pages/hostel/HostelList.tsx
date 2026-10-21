@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { FiEdit2, FiDollarSign, FiX, FiSearch, FiClock, FiCalendar, FiRefreshCw } from 'react-icons/fi';
+import { FiEdit2, FiDollarSign, FiX, FiSearch, FiClock, FiCalendar, FiRefreshCw, FiTrash2, FiPlus } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../../api/axios';
 
@@ -48,6 +48,7 @@ interface HostelFeePeriod {
   paid_amount: number;
   pending_balance: number;
   payment_count: number;
+  is_deleted?: boolean;
 }
 
 interface HostelFeeRevision {
@@ -286,6 +287,7 @@ const HostelList: React.FC = () => {
   const [hostelHistory, setHostelHistory] = useState<HostelHistory | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [deletingHistory, setDeletingHistory] = useState(false);
+  const [savingMonthlyAction, setSavingMonthlyAction] = useState(false);
 
 
 
@@ -498,7 +500,7 @@ const HostelList: React.FC = () => {
           period_id: toNum(p.period_id), period_from: String(p.period_from || ''), period_to: String(p.period_to || ''),
           hostel_fee: toNum(p.hostel_fee), mess_fee: toNum(p.mess_fee), total_fee: toNum(p.total_fee),
           discount: toNum(p.discount), paid_amount: toNum(p.paid_amount), pending_balance: toNum(p.pending_balance),
-          payment_count: toNum(p.payment_count),
+          payment_count: toNum(p.payment_count), is_deleted: Boolean(p.is_deleted),
         })),
         payments: (data.payments || []).map((p: Record<string, unknown>) => ({
           id: toNum(p.id), amount: toNum(p.amount), payment_date: String(p.payment_date || ''),
@@ -584,6 +586,43 @@ const HostelList: React.FC = () => {
     });
     setHistoryModal(false);
     setEditModal(true);
+  };
+
+  const deleteMonthlyFee = async (period: HostelFeePeriod) => {
+    if (!historyTarget || period.is_deleted || savingMonthlyAction) return;
+    const month = monthLabel(monthValue(new Date(`${period.period_from}T00:00:00`)));
+    if (!window.confirm(`Delete ${month} fee from calculations? Payment transaction history will be preserved.`)) return;
+    setSavingMonthlyAction(true);
+    try {
+      await api.delete(`/hostel/${historyTarget.hostel_record_id}/history/periods/${period.period_id}`);
+      toast.success(`${month} fee deleted.`);
+      await openHistory(historyTarget);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to delete monthly fee');
+    } finally { setSavingMonthlyAction(false); }
+  };
+
+  const restoreMonthlyFee = async (period: HostelFeePeriod) => {
+    if (!historyTarget || !period.is_deleted || savingMonthlyAction) return;
+    const previous = hostelHistory?.periods.filter(p => !p.is_deleted && p.period_from < period.period_from).slice(-1)[0];
+    const hostelRaw = window.prompt('Hostel fee for this month (₹):', String(previous?.hostel_fee ?? historyTarget.hostel_fee ?? 0));
+    if (hostelRaw === null) return;
+    const messRaw = window.prompt('Mess fee for this month (₹):', String(previous?.mess_fee ?? historyTarget.mess_fee ?? 0));
+    if (messRaw === null) return;
+    const hostelFee = Number(hostelRaw), messFee = Number(messRaw);
+    if (!Number.isFinite(hostelFee) || !Number.isFinite(messFee) || hostelFee < 0 || messFee < 0) {
+      toast.error('Enter valid non-negative hostel and mess fees.'); return;
+    }
+    setSavingMonthlyAction(true);
+    try {
+      await api.post(`/hostel/${historyTarget.hostel_record_id}/history/periods/${period.period_id}/restore`, { hostel_fee: hostelFee, mess_fee: messFee });
+      toast.success('Monthly fee added back.');
+      await openHistory(historyTarget);
+      await load();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to add monthly fee');
+    } finally { setSavingMonthlyAction(false); }
   };
 
   const deleteFeeSchedule = async () => {
@@ -769,7 +808,7 @@ const HostelList: React.FC = () => {
             {[{ label: 'Total Scheduled Fee', value: fmt(hostelHistory.summary.total_fee), color: '#f59e0b' }, { label: 'Total Paid', value: fmt(hostelHistory.summary.total_paid), color: '#10b981' }, { label: 'Remaining Balance', value: fmt(hostelHistory.summary.total_pending), color: hostelHistory.summary.total_pending > 0 ? '#ef4444' : '#10b981' }].map(card => <div key={card.label} style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg-secondary, rgba(255,255,255,0.04))', border: '1px solid var(--border-light)' }}><div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 5 }}>{card.label}</div><div style={{ fontSize: 18, fontWeight: 800, color: card.color }}>{card.value}</div></div>)}
           </div>
           <h3 style={{ fontSize: 14, margin: '4px 0 8px' }}>Monthly Fee Schedule</h3>
-          {hostelHistory.periods.length === 0 ? <div className="empty-state" style={{ padding: 18 }}>No fee periods saved yet.</div> : <div className="table-container" style={{ maxHeight: 280, overflow: 'auto', marginBottom: 18 }}><table><thead><tr><th>Month / Period</th><th>Hostel</th><th>Mess</th><th>Total Fee</th><th>Paid</th><th>Pending</th><th>Status</th></tr></thead><tbody>{hostelHistory.periods.map(period => { const month = monthLabel(monthValue(new Date(`${period.period_from}T00:00:00`))); const cleared = period.pending_balance <= 0; return <tr key={period.period_id}><td><strong>{month}</strong><div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{displayDate(period.period_from)} – {displayDate(period.period_to)}</div></td><td>{fmt(period.hostel_fee)}</td><td>{fmt(period.mess_fee)}</td><td style={{ fontWeight: 700 }}>{fmt(Math.max(0, period.total_fee - period.discount))}{period.discount > 0 && <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Discount {fmt(period.discount)}</div>}</td><td style={{ color: '#10b981', fontWeight: 700 }}>{fmt(period.paid_amount)}</td><td style={{ color: period.pending_balance > 0 ? '#ef4444' : '#10b981', fontWeight: 700 }}>{fmt(period.pending_balance)}</td><td><span style={{ color: cleared ? '#10b981' : period.paid_amount > 0 ? '#f59e0b' : '#ef4444', fontSize: 11, fontWeight: 700 }}>{cleared ? 'PAID' : period.paid_amount > 0 ? 'PARTIAL' : 'PENDING'}</span></td></tr>; })}</tbody></table></div>}
+          {hostelHistory.periods.length === 0 ? <div className="empty-state" style={{ padding: 18 }}>No fee periods saved yet.</div> : <div className="table-container" style={{ maxHeight: 280, overflow: 'auto', marginBottom: 18 }}><table><thead><tr><th>Month / Period</th><th>Hostel</th><th>Mess</th><th>Total Fee</th><th>Paid</th><th>Pending</th><th>Status</th><th>Action</th></tr></thead><tbody>{hostelHistory.periods.map(period => { const month = monthLabel(monthValue(new Date(`${period.period_from}T00:00:00`))); const cleared = period.pending_balance <= 0; const deleted = Boolean(period.is_deleted); return <tr key={period.period_id} style={deleted ? { opacity: 0.72 } : undefined}><td><strong>{month}</strong><div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{displayDate(period.period_from)} – {displayDate(period.period_to)}</div></td><td>{fmt(deleted ? 0 : period.hostel_fee)}</td><td>{fmt(deleted ? 0 : period.mess_fee)}</td><td style={{ fontWeight: 700 }}>{fmt(deleted ? 0 : Math.max(0, period.total_fee - period.discount))}</td><td style={{ color: '#10b981', fontWeight: 700 }}>{fmt(deleted ? 0 : period.paid_amount)}</td><td style={{ color: !deleted && period.pending_balance > 0 ? '#ef4444' : '#10b981', fontWeight: 700 }}>{fmt(deleted ? 0 : period.pending_balance)}</td><td><span style={{ color: deleted ? '#94a3b8' : cleared ? '#10b981' : period.paid_amount > 0 ? '#f59e0b' : '#ef4444', fontSize: 11, fontWeight: 700 }}>{deleted ? 'DELETED' : cleared ? 'PAID' : period.paid_amount > 0 ? 'PARTIAL' : 'PENDING'}</span></td><td>{deleted ? <button type="button" className="btn btn-primary" style={{ padding: '5px 8px', fontSize: 11 }} disabled={savingMonthlyAction} onClick={() => restoreMonthlyFee(period)}><FiPlus /> Add New</button> : <button type="button" className="btn btn-danger" style={{ padding: '5px 8px', fontSize: 11 }} disabled={savingMonthlyAction} title={`Delete ${month}`} onClick={() => deleteMonthlyFee(period)}><FiTrash2 /></button>}</td></tr>; })}</tbody></table></div>}
           <h3 style={{ fontSize: 14, margin: '4px 0 8px' }}>Fee Change History</h3>
           {hostelHistory.revisions.length === 0 ? <div style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 0 14px' }}>No fee revisions recorded by the new history tracker yet. Existing monthly rates remain visible above.</div> : <div className="table-container" style={{ maxHeight: 180, overflow: 'auto', marginBottom: 18 }}><table><thead><tr><th>Effective From</th><th>Effective To</th><th>Previous Monthly Total</th><th>New Monthly Total</th><th>Changed By</th><th>Notes</th></tr></thead><tbody>{hostelHistory.revisions.map(rev => <tr key={rev.id}><td>{displayDate(rev.effective_from)}</td><td>{displayDate(rev.effective_to)}</td><td>{rev.previous_hostel_fee == null || rev.previous_mess_fee == null ? '—' : fmt(rev.previous_hostel_fee + rev.previous_mess_fee)}</td><td style={{ color: '#f59e0b', fontWeight: 700 }}>{fmt(rev.new_hostel_fee + rev.new_mess_fee)}</td><td>{rev.changed_by_name || '—'}</td><td>{rev.notes || '—'}</td></tr>)}</tbody></table></div>}
           <h3 style={{ fontSize: 14, margin: '4px 0 8px' }}>Payment Transactions</h3>

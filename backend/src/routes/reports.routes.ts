@@ -140,10 +140,12 @@ router.get('/hostel', async (req: AuthRequest, res: Response) => {
                 WHERE fp_paid.id=hp.period_id
                   AND fp_paid.hostel_record_id=hr.id
                   AND fp_paid.start_date <= $2::date
+                  AND COALESCE(fp_paid.is_deleted,FALSE)=FALSE
               ))
               OR (hp.period_id IS NULL
                   AND hp.payment_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
-                  AND hp.payment_date <= $2::date)
+                  AND hp.payment_date <= $2::date
+                  AND NOT EXISTS (SELECT 1 FROM hostel_fee_periods fp_deleted WHERE fp_deleted.hostel_record_id=hr.id AND fp_deleted.is_deleted=TRUE AND hp.payment_date BETWEEN fp_deleted.start_date AND fp_deleted.end_date))
             )),0)::numeric AS amount_paid,
         -- Report fee remains the selected month's charge; balance_due carries
         -- forward all unpaid scheduled fees through the selected month.
@@ -152,7 +154,8 @@ router.get('/hostel', async (req: AuthRequest, res: Response) => {
             FROM hostel_fee_periods fp_due
             WHERE fp_due.hostel_record_id=hr.id
               AND fp_due.start_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
-              AND fp_due.start_date <= $2::date),0)
+              AND fp_due.start_date <= $2::date
+              AND COALESCE(fp_due.is_deleted,FALSE)=FALSE),0)
           - COALESCE((SELECT SUM(hp_due.amount)
             FROM hostel_payments hp_due
             WHERE hp_due.hostel_record_id=hr.id
@@ -162,10 +165,12 @@ router.get('/hostel', async (req: AuthRequest, res: Response) => {
                 WHERE fp_paid.id=hp_due.period_id AND fp_paid.hostel_record_id=hr.id
                   AND fp_paid.start_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
                   AND fp_paid.start_date <= $2::date
+                  AND COALESCE(fp_paid.is_deleted,FALSE)=FALSE
               ))
               OR (hp_due.period_id IS NULL
                   AND hp_due.payment_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
-                  AND hp_due.payment_date <= $2::date)
+                  AND hp_due.payment_date <= $2::date
+                  AND NOT EXISTS (SELECT 1 FROM hostel_fee_periods fp_deleted WHERE fp_deleted.hostel_record_id=hr.id AND fp_deleted.is_deleted=TRUE AND hp_due.payment_date BETWEEN fp_deleted.start_date AND fp_deleted.end_date))
             )),0),
           0
         )::numeric AS balance_due
@@ -176,6 +181,7 @@ router.get('/hostel', async (req: AuthRequest, res: Response) => {
       LEFT JOIN LATERAL (
         SELECT hfp.* FROM hostel_fee_periods hfp
         WHERE hfp.hostel_record_id=hr.id
+          AND COALESCE(hfp.is_deleted,FALSE)=FALSE
           AND hfp.start_date <= $2::date
           AND hfp.end_date > $1::date
         ORDER BY (date_trunc('month', hfp.start_date) = date_trunc('month', $1::date)) DESC,
@@ -193,6 +199,7 @@ router.get('/hostel', async (req: AuthRequest, res: Response) => {
           OR EXISTS (
             SELECT 1 FROM hostel_fee_periods hfp_month
             WHERE hfp_month.hostel_record_id=hr.id
+              AND COALESCE(hfp_month.is_deleted,FALSE)=FALSE
               AND hfp_month.start_date <= $2::date AND hfp_month.end_date > $1::date
           )
           OR (

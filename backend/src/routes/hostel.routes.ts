@@ -119,8 +119,10 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
                 WHERE fp_paid.id = hp.period_id
                   AND fp_paid.hostel_record_id = hr.id
                   AND fp_paid.start_date <= $2::date
+                  AND COALESCE(fp_paid.is_deleted, FALSE)=FALSE
               ))
-              OR (hp.period_id IS NULL AND hp.payment_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date)
+              OR (hp.period_id IS NULL AND hp.payment_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
+                  AND NOT EXISTS (SELECT 1 FROM hostel_fee_periods fp_deleted WHERE fp_deleted.hostel_record_id=hr.id AND fp_deleted.is_deleted=TRUE AND hp.payment_date BETWEEN fp_deleted.start_date AND fp_deleted.end_date))
             )), 0)::numeric AS paid_amount,
         -- Show only the selected month's fee in total_fee, but carry any
         -- unpaid balance from earlier fee months into pending_balance.
@@ -129,7 +131,8 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
             FROM hostel_fee_periods fp_due
             WHERE fp_due.hostel_record_id = hr.id
               AND fp_due.start_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
-              AND fp_due.start_date <= $2::date), 0)
+              AND fp_due.start_date <= $2::date
+              AND COALESCE(fp_due.is_deleted, FALSE)=FALSE), 0)
           - COALESCE((SELECT SUM(hp_due.amount)
             FROM hostel_payments hp_due
             WHERE hp_due.hostel_record_id = hr.id
@@ -141,10 +144,12 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
                     AND fp_paid.hostel_record_id = hr.id
                     AND fp_paid.start_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
                     AND fp_paid.start_date <= $2::date
+                    AND COALESCE(fp_paid.is_deleted, FALSE)=FALSE
                 ))
                 OR (hp_due.period_id IS NULL
                     AND hp_due.payment_date >= date_trunc('month', COALESCE(s.admission_date, s.created_at::date))::date
-                    AND hp_due.payment_date <= $2::date)
+                    AND hp_due.payment_date <= $2::date
+                    AND NOT EXISTS (SELECT 1 FROM hostel_fee_periods fp_deleted WHERE fp_deleted.hostel_record_id=hr.id AND fp_deleted.is_deleted=TRUE AND hp_due.payment_date BETWEEN fp_deleted.start_date AND fp_deleted.end_date))
               )), 0),
           0
         )::numeric AS pending_balance,
@@ -157,6 +162,7 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         SELECT hfp.*
         FROM hostel_fee_periods hfp
         WHERE hfp.hostel_record_id = hr.id
+          AND COALESCE(hfp.is_deleted, FALSE)=FALSE
           AND hfp.start_date <= $2::date
           AND hfp.end_date > $1::date
         ORDER BY (date_trunc('month', hfp.start_date) = date_trunc('month', $1::date)) DESC, hfp.start_date DESC, hfp.id DESC
@@ -175,6 +181,7 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
           OR EXISTS (
             SELECT 1 FROM hostel_fee_periods hfp_month
             WHERE hfp_month.hostel_record_id = hr.id
+              AND COALESCE(hfp_month.is_deleted, FALSE)=FALSE
               AND hfp_month.start_date <= $2::date
               AND hfp_month.end_date > $1::date
           )
@@ -247,16 +254,17 @@ router.get('/:id/history', authorize('super_admin', 'admin', 'incharge'), async 
       `SELECT fp.id AS period_id,
               TO_CHAR(fp.start_date, 'YYYY-MM-DD') AS period_from,
               TO_CHAR(fp.end_date, 'YYYY-MM-DD') AS period_to,
-              COALESCE(fp.hostel_fee, 0)::numeric AS hostel_fee,
-              COALESCE(fp.mess_fee, 0)::numeric AS mess_fee,
-              (COALESCE(fp.hostel_fee, 0) + COALESCE(fp.mess_fee, 0))::numeric AS total_fee,
-              COALESCE(fp.discount, 0)::numeric AS discount,
-              COALESCE(SUM(hp.amount), 0)::numeric AS paid_amount,
-              GREATEST(COALESCE(fp.hostel_fee, 0) + COALESCE(fp.mess_fee, 0)
-                - COALESCE(fp.discount, 0) - COALESCE(SUM(hp.amount), 0), 0)::numeric AS pending_balance,
-              COUNT(hp.id)::int AS payment_count
+              CASE WHEN fp.is_deleted THEN 0 ELSE COALESCE(fp.hostel_fee, 0) END::numeric AS hostel_fee,
+              CASE WHEN fp.is_deleted THEN 0 ELSE COALESCE(fp.mess_fee, 0) END::numeric AS mess_fee,
+              CASE WHEN fp.is_deleted THEN 0 ELSE COALESCE(fp.hostel_fee, 0) + COALESCE(fp.mess_fee, 0) END::numeric AS total_fee,
+              CASE WHEN fp.is_deleted THEN 0 ELSE COALESCE(fp.discount, 0) END::numeric AS discount,
+              CASE WHEN fp.is_deleted THEN 0 ELSE COALESCE(SUM(hp.amount), 0) END::numeric AS paid_amount,
+              CASE WHEN fp.is_deleted THEN 0 ELSE GREATEST(COALESCE(fp.hostel_fee, 0) + COALESCE(fp.mess_fee, 0)
+                - COALESCE(fp.discount, 0) - COALESCE(SUM(hp.amount), 0), 0) END::numeric AS pending_balance,
+              CASE WHEN fp.is_deleted THEN 0 ELSE COUNT(hp.id)::int END AS payment_count,
+              COALESCE(fp.is_deleted, FALSE) AS is_deleted
        FROM hostel_fee_periods fp
-       LEFT JOIN hostel_payments hp ON (hp.period_id = fp.id OR (hp.period_id IS NULL AND hp.hostel_record_id=fp.hostel_record_id AND hp.payment_date BETWEEN fp.start_date AND fp.end_date))
+       LEFT JOIN hostel_payments hp ON NOT fp.is_deleted AND (hp.period_id = fp.id OR (hp.period_id IS NULL AND hp.hostel_record_id=fp.hostel_record_id AND hp.payment_date BETWEEN fp.start_date AND fp.end_date))
        WHERE fp.hostel_record_id = $1
        GROUP BY fp.id
        ORDER BY fp.start_date ASC, fp.id ASC`, [id]
@@ -292,21 +300,63 @@ router.get('/:id/history', authorize('super_admin', 'admin', 'incharge'), async 
     );
 
     const periods = periodsResult.rows;
-    const totalFee = periods.reduce((sum: number, row: any) => sum + Math.max(0, Number(row.total_fee || 0) - Number(row.discount || 0)), 0);
-    const totalPaid = periods.reduce((sum: number, row: any) => sum + Number(row.paid_amount || 0), 0);
+    const activePeriods = periods.filter((row: any) => !row.is_deleted);
+    const totalFee = activePeriods.reduce((sum: number, row: any) => sum + Math.max(0, Number(row.total_fee || 0) - Number(row.discount || 0)), 0);
+    const totalPaid = activePeriods.reduce((sum: number, row: any) => sum + Number(row.paid_amount || 0), 0);
     const totalPending = Math.max(0, totalFee - totalPaid);
     res.json({
       success: true,
       data: {
         student: studentResult.rows[0],
         active_schedule: scheduleResult.rows[0] || null,
-        summary: { months: periods.length, total_fee: totalFee, total_paid: totalPaid, total_pending: totalPending },
+        summary: { months: activePeriods.length, total_fee: totalFee, total_paid: totalPaid, total_pending: totalPending },
         periods, payments: paymentsResult.rows, revisions: revisionsResult.rows,
       },
     });
   } catch (err) {
     console.error('GET /hostel/:id/history error:', err);
     res.status(500).json({ success: false, message: 'Failed to load hostel fee history' });
+  }
+});
+
+// DELETE /api/hostel/:id/history/periods/:periodId — remove one month from active fee calculations.
+router.delete('/:id/history/periods/:periodId', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id), periodId = Number(req.params.periodId);
+    if (!Number.isInteger(id) || !Number.isInteger(periodId) || id <= 0 || periodId <= 0) {
+      res.status(400).json({ success: false, message: 'Invalid hostel record or period ID' }); return;
+    }
+    const result = await query(
+      `UPDATE hostel_fee_periods SET is_deleted=TRUE, updated_at=NOW()
+       WHERE id=$1 AND hostel_record_id=$2 AND COALESCE(is_deleted,FALSE)=FALSE
+       RETURNING id`, [periodId, id]
+    );
+    if (!result.rows.length) { res.status(404).json({ success: false, message: 'Active monthly fee period not found' }); return; }
+    res.json({ success: true, message: 'Monthly fee removed from active calculations.' });
+  } catch (err) {
+    console.error('DELETE monthly hostel fee error:', err);
+    res.status(500).json({ success: false, message: 'Failed to delete monthly hostel fee' });
+  }
+});
+
+// POST /api/hostel/:id/history/periods/:periodId/restore — restore one deleted month with edited fees.
+router.post('/:id/history/periods/:periodId/restore', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
+  try {
+    const id = Number(req.params.id), periodId = Number(req.params.periodId);
+    const hostelFee = Number(req.body?.hostel_fee), messFee = Number(req.body?.mess_fee);
+    if (!Number.isInteger(id) || !Number.isInteger(periodId) || id <= 0 || periodId <= 0 || !Number.isFinite(hostelFee) || !Number.isFinite(messFee) || hostelFee < 0 || messFee < 0) {
+      res.status(400).json({ success: false, message: 'Valid non-negative hostel and mess fees are required' }); return;
+    }
+    const result = await query(
+      `UPDATE hostel_fee_periods SET is_deleted=FALSE, hostel_fee=$1, mess_fee=$2, updated_at=NOW()
+       WHERE id=$3 AND hostel_record_id=$4 AND is_deleted=TRUE
+       RETURNING id`, [hostelFee, messFee, periodId, id]
+    );
+    if (!result.rows.length) { res.status(404).json({ success: false, message: 'Deleted monthly fee period not found' }); return; }
+    res.json({ success: true, message: 'Monthly fee restored.' });
+  } catch (err) {
+    console.error('RESTORE monthly hostel fee error:', err);
+    res.status(500).json({ success: false, message: 'Failed to restore monthly hostel fee' });
   }
 });
 
@@ -380,7 +430,7 @@ router.post('/:id/payments', authorize('super_admin', 'admin'), async (req: Auth
     try {
       await client.query('BEGIN');
       const periodCheck = await client.query(
-        'SELECT id FROM hostel_fee_periods WHERE id=$1 AND hostel_record_id=$2 FOR UPDATE',
+        'SELECT id FROM hostel_fee_periods WHERE id=$1 AND hostel_record_id=$2 AND COALESCE(is_deleted,FALSE)=FALSE FOR UPDATE',
         [selectedPeriodId, id]
       );
       if (!periodCheck.rows.length) {
@@ -393,29 +443,45 @@ router.post('/:id/payments', authorize('super_admin', 'admin'), async (req: Auth
       // Lock the student's fee record so two concurrent payments cannot exceed the balance.
       await client.query('SELECT id FROM hostel_records WHERE id=$1 FOR UPDATE', [id]);
       const dueResult = await client.query(
-        `SELECT
-           COALESCE(SUM(GREATEST(COALESCE(fp.hostel_fee,0) + COALESCE(fp.mess_fee,0) - COALESCE(fp.discount,0), 0)),0)::numeric AS billed,
-           COALESCE((SELECT SUM(hp.amount)
-             FROM hostel_payments hp
-             WHERE hp.hostel_record_id=$1
-               AND hp.payment_date < (fp_selected.start_date + INTERVAL '1 month')
-               AND (
-                 (hp.period_id IS NOT NULL AND EXISTS (
-                   SELECT 1 FROM hostel_fee_periods fp_paid
-                   WHERE fp_paid.id=hp.period_id
-                     AND fp_paid.hostel_record_id=$1
-                     AND fp_paid.start_date <= fp_selected.start_date
-                 ))
-                 OR (hp.period_id IS NULL AND hp.payment_date >= (
-                   SELECT COALESCE(MIN(fp_start.start_date), date_trunc('month', COALESCE(s.admission_date,s.created_at::date))::date)
-                   FROM hostel_fee_periods fp_start WHERE fp_start.hostel_record_id=$1
-                 ))
-               )),0)::numeric AS paid
-         FROM hostel_fee_periods fp
-         JOIN hostel_fee_periods fp_selected ON fp_selected.id=$2 AND fp_selected.hostel_record_id=fp.hostel_record_id
-         JOIN students s ON s.id=(SELECT student_id FROM hostel_records WHERE id=$1)
-         WHERE fp.hostel_record_id=$1 AND fp.start_date <= fp_selected.start_date
-         GROUP BY fp_selected.start_date`,
+        `WITH selected_period AS (
+           SELECT start_date, end_date
+           FROM hostel_fee_periods
+           WHERE id = $2 AND hostel_record_id = $1 AND COALESCE(is_deleted,FALSE)=FALSE
+         ), billed AS (
+           SELECT COALESCE(SUM(GREATEST(
+             COALESCE(fp.hostel_fee, 0) + COALESCE(fp.mess_fee, 0) - COALESCE(fp.discount, 0), 0
+           )), 0)::numeric AS amount
+           FROM hostel_fee_periods fp
+           CROSS JOIN selected_period sp
+           WHERE fp.hostel_record_id = $1
+             AND COALESCE(fp.is_deleted,FALSE)=FALSE
+             AND fp.start_date <= sp.end_date
+         ), paid AS (
+           SELECT COALESCE(SUM(hp.amount), 0)::numeric AS amount
+           FROM hostel_payments hp
+           CROSS JOIN selected_period sp
+           WHERE hp.hostel_record_id = $1
+             AND (
+               (hp.period_id IS NOT NULL AND EXISTS (
+                 SELECT 1
+                 FROM hostel_fee_periods fp_paid
+                 WHERE fp_paid.id = hp.period_id
+                   AND fp_paid.hostel_record_id = $1
+                   AND fp_paid.start_date <= sp.end_date
+                   AND COALESCE(fp_paid.is_deleted,FALSE)=FALSE
+               ))
+               OR (hp.period_id IS NULL
+                   AND hp.payment_date <= sp.end_date
+                   AND hp.payment_date >= (
+                     SELECT COALESCE(MIN(fp_start.start_date), sp.start_date)
+                     FROM hostel_fee_periods fp_start
+                     WHERE fp_start.hostel_record_id = $1 AND COALESCE(fp_start.is_deleted,FALSE)=FALSE
+                   )
+                   AND NOT EXISTS (SELECT 1 FROM hostel_fee_periods fp_deleted WHERE fp_deleted.hostel_record_id=$1 AND fp_deleted.is_deleted=TRUE AND hp.payment_date BETWEEN fp_deleted.start_date AND fp_deleted.end_date))
+             )
+         )
+         SELECT billed.amount AS billed, paid.amount AS paid
+         FROM billed CROSS JOIN paid`,
         [id, selectedPeriodId]
       );
       const billedThroughSelected = Number(dueResult.rows[0]?.billed || 0);
