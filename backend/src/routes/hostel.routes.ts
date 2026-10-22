@@ -108,6 +108,19 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         COALESCE(fp.mess_fee, 0)::numeric AS mess_fee,
         (COALESCE(fp.hostel_fee, 0) + COALESCE(fp.mess_fee, 0))::numeric AS total_fee,
         COALESCE(fp.discount, 0)::numeric AS discount,
+        -- Payment credited specifically to this selected fee period. This is
+        -- separate from cumulative paid/pending so receipt eligibility never
+        -- depends on earlier-month balances.
+        COALESCE((SELECT SUM(hp_period.amount)
+          FROM hostel_payments hp_period
+          WHERE hp_period.hostel_record_id=hr.id
+            AND hp_period.period_id=fp.id
+            AND hp_period.payment_date <= $2::date), 0)::numeric AS period_paid_amount,
+        (SELECT MAX(hp_date.payment_date)::date
+          FROM hostel_payments hp_date
+          WHERE hp_date.hostel_record_id=hr.id
+            AND hp_date.period_id=fp.id
+            AND hp_date.payment_date <= $2::date) AS period_last_payment_date,
         -- Cumulative paid through the selected month, matching the cumulative pending balance.
         COALESCE((SELECT SUM(hp.amount)
           FROM hostel_payments hp

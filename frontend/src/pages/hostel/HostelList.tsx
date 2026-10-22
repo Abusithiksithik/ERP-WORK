@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
-import { FiEdit2, FiDollarSign, FiX, FiSearch, FiClock, FiCalendar, FiRefreshCw, FiTrash2, FiPlus } from 'react-icons/fi';
+import { FiEdit2, FiDollarSign, FiX, FiSearch, FiClock, FiCalendar, FiRefreshCw, FiTrash2, FiPlus, FiPrinter, FiDownload, FiSettings, FiCheck } from 'react-icons/fi';
 import { toast } from 'react-toastify';
 import api from '../../api/axios';
 
@@ -20,6 +20,8 @@ interface HostelStudent {
   total_fee: number;
   discount: number;
   paid_amount: number;
+  period_paid_amount: number;
+  period_last_payment_date: string | null;
   pending_balance: number;
   notes: string | null;
   joining_date: string | null;
@@ -241,6 +243,8 @@ const normalise = (row: Record<string, unknown>): HostelStudent => ({
   total_fee: toNum(row.total_fee),
   discount: toNum(row.discount),
   paid_amount: toNum(row.paid_amount),
+  period_paid_amount: toNum(row.period_paid_amount),
+  period_last_payment_date: row.period_last_payment_date ? String(row.period_last_payment_date).slice(0, 10) : null,
   pending_balance: toNum(row.pending_balance),
   notes: row.notes ? String(row.notes) : null,
   joining_date: row.joining_date ? String(row.joining_date).slice(0, 10) : null,
@@ -288,6 +292,13 @@ const HostelList: React.FC = () => {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [deletingHistory, setDeletingHistory] = useState(false);
   const [savingMonthlyAction, setSavingMonthlyAction] = useState(false);
+  const [receiptTarget, setReceiptTarget] = useState<HostelStudent | null>(null);
+  const [receiptPaymentDate, setReceiptPaymentDate] = useState(localISO(new Date()));
+  const [receiptAmount, setReceiptAmount] = useState('');
+  const [receiptStaff, setReceiptStaff] = useState('');
+  const [staffSettingsOpen, setStaffSettingsOpen] = useState(false);
+  const [staffDraft, setStaffDraft] = useState('');
+  const [seniorStaff, setSeniorStaff] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem('hostel_senior_staff') || '[]'); } catch { return []; } });
 
 
 
@@ -651,6 +662,33 @@ const HostelList: React.FC = () => {
     }
   };
 
+  const openReceipt = (student: HostelStudent) => {
+    const periodTotal = Math.max(0, student.total_fee - student.discount);
+    if (!student.period_id || periodTotal <= 0 || student.period_paid_amount < periodTotal) {
+      toast.info('Receipt is available only after this month’s hostel and mess fees are fully paid.');
+      return;
+    }
+    setReceiptTarget(student);
+    setReceiptAmount(String(periodTotal));
+    setReceiptPaymentDate(student.period_last_payment_date || localISO(new Date()));
+    setReceiptStaff(seniorStaff[0] || '');
+  };
+  const saveSeniorStaff = () => {
+    const names = [...new Set(staffDraft.split(/\n|,/).map(n => n.trim()).filter(Boolean))];
+    setSeniorStaff(names);
+    localStorage.setItem('hostel_senior_staff', JSON.stringify(names));
+    setStaffSettingsOpen(false);
+    toast.success('Senior staff list saved on this browser');
+  };
+  const printReceipt = () => window.print();
+  const downloadReceipt = () => {
+    if (!receiptTarget) return;
+    const html = document.getElementById('hostel-receipt-print')?.outerHTML;
+    if (!html) return;
+    const blob = new Blob([`<!doctype html><html><head><meta charset=\"utf-8\"><title>Nalam Trust Receipt</title><style>body{font-family:Georgia,serif;padding:25px;color:#172554}.receipt{border:3px double #283c75;padding:28px;max-width:850px;margin:auto;min-height:360px}.brand{text-align:center;font-size:30px;font-weight:bold;letter-spacing:1px}.label{text-align:center;background:#283c75;color:white;width:max-content;margin:8px auto;padding:5px 18px;font-weight:bold}.line{margin:24px 0;border-bottom:1px dotted #333;padding:8px 0}.amount{border:1px solid #283c75;padding:12px;font-size:22px;font-weight:bold;width:180px}.handover{text-align:right;margin-top:40px}</style></head><body>${html}</body></html>`], {type:'text/html'});
+    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download=`Receipt-${receiptTarget.student_code}-${periodMonth}.html`; a.click(); URL.revokeObjectURL(url);
+  };
+
   const previewTotal = (parseFloat(feeForm.hostel_fee) || 0) + (parseFloat(feeForm.mess_fee) || 0);
   const previewPending = Math.max(0, previewTotal - (editTarget?.discount || 0) - (editTarget?.paid_amount || 0));
   const previewMonths = monthDifference(feeForm.start_date, feeForm.end_date);
@@ -680,7 +718,7 @@ const HostelList: React.FC = () => {
           <h1 className="page-title">🏠 Hostel Management</h1>
           <p className="page-subtitle">Candidates staying in hostel — monthly fee tracking &amp; payments</p>
         </div>
-
+        <button type="button" className="btn btn-secondary" onClick={() => { setStaffDraft(seniorStaff.join('\n')); setStaffSettingsOpen(true); }}><FiSettings style={{ marginRight: 6 }} /> Senior Staff</button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16, marginBottom: 24 }}>
@@ -751,6 +789,7 @@ const HostelList: React.FC = () => {
                     <button className="action-btn" title="Record Payment" style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', border: 'none', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => openPay(s)}><FiDollarSign /></button>
                     <button className="action-btn" title="Discount" style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.1)', border: 'none', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => openDiscount(s)}>🏷️</button>
                     <button className="action-btn" title="Payment History" style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.1)', border: 'none', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => openHistory(s)}><FiClock /></button>
+                    {s.period_id && s.total_fee - s.discount > 0 && s.period_paid_amount >= Math.max(0, s.total_fee - s.discount) && <button className="action-btn" title="Generate monthly receipt" style={{ color: '#10b981', background: 'rgba(16,185,129,0.12)', border: 'none', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => openReceipt(s)}><FiPrinter /></button>}
                   </div></td>
                 </tr>;
               })}</tbody>
@@ -817,6 +856,9 @@ const HostelList: React.FC = () => {
         <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end', flexShrink: 0 }}><button className="btn btn-secondary" onClick={() => setHistoryModal(false)}>Close</button></div>
       </div></div>}
 
+      {staffSettingsOpen && <div className="modal-overlay" onClick={() => setStaffSettingsOpen(false)}><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}><div className="modal-header"><h2 className="modal-title">Senior Staff Settings</h2><button className="modal-close" onClick={() => setStaffSettingsOpen(false)}><FiX /></button></div><p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Add one senior staff name per line. These names appear in the receipt’s Handover By dropdown.</p><textarea className="form-control" rows={5} value={staffDraft} onChange={e => setStaffDraft(e.target.value)} placeholder="Senior staff name 1\nSenior staff name 2" /><div className="form-actions"><button className="btn btn-primary" onClick={saveSeniorStaff}>Save Staff</button><button className="btn btn-secondary" onClick={() => setStaffSettingsOpen(false)}>Cancel</button></div></div></div>}
+
+      {receiptTarget && <div className="modal-overlay receipt-overlay" onClick={() => setReceiptTarget(null)}><style>{`@media print { body * { visibility: hidden !important; } #hostel-receipt-print, #hostel-receipt-print * { visibility: visible !important; } #hostel-receipt-print { position: fixed; left: 0; top: 0; width: 100%; max-width: none !important; margin: 0 !important; box-sizing: border-box; } .no-print { display: none !important; } }`}</style><div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 860, width: 'min(860px, 96vw)', maxHeight: '94vh', overflowY: 'auto' }}><div className="modal-header no-print"><h2 className="modal-title">Receipt Preview</h2><button className="modal-close" onClick={() => setReceiptTarget(null)}><FiX /></button></div><div id="hostel-receipt-print" className="receipt" style={{ border: '3px double #283c75', padding: 28, minHeight: 390, background: '#fff', color: '#172554', fontFamily: 'Georgia, serif', maxWidth: 800, margin: '0 auto' }}><div style={{ textAlign: 'center', fontSize: 30, fontWeight: 800, letterSpacing: 1 }}>NALAM TRUST</div><div style={{ textAlign: 'center', margin: '8px auto 24px', background: '#283c75', color: '#fff', width: 'max-content', padding: '5px 18px', fontWeight: 700 }}>RECEIPT</div><div style={{ textAlign: 'right', marginBottom: 20 }}>Date: {displayDate(receiptPaymentDate)}</div><div style={{ borderBottom: '1px dotted #333', padding: '14px 0' }}>Received with thanks from M/s. <strong>{receiptTarget.full_name}</strong></div><div style={{ borderBottom: '1px dotted #333', padding: '14px 0' }}>a sum of Rupees <strong>{fmt(receiptAmount)}</strong></div><div style={{ borderBottom: '1px dotted #333', padding: '14px 0' }}>towards <strong>Hostel &amp; Mess Fees — {monthLabel(periodMonth)}</strong></div><div style={{ marginTop: 26, display: 'flex', justifyContent: 'space-between', alignItems: 'end' }}><div style={{ border: '1px solid #283c75', padding: 12, fontSize: 22, fontWeight: 800, minWidth: 160 }}>{fmt(receiptAmount)}</div><div style={{ textAlign: 'right' }}>For NALAM TRUST<br/><br/><strong>Handover By: {receiptStaff || '________________'}</strong><br/><small>Trustee / Managing Trustee</small></div></div></div><div className="form-actions no-print" style={{ justifyContent: 'flex-end' }}><label style={{ marginRight: 'auto', minWidth: 220 }}>Payment Date<input type="date" className="form-control" value={receiptPaymentDate} onChange={e => setReceiptPaymentDate(e.target.value)} /></label><label style={{ minWidth: 220 }}>Handover By<select className="form-control" value={receiptStaff} onChange={e => setReceiptStaff(e.target.value)}><option value="">Select Senior Staff</option>{seniorStaff.map(name => <option key={name} value={name}>{name}</option>)}</select></label><button className="btn btn-secondary" onClick={downloadReceipt}><FiDownload style={{ marginRight: 5 }} />Download</button><button className="btn btn-primary" onClick={printReceipt}><FiPrinter style={{ marginRight: 5 }} />Print</button></div></div></div>}
 
     </div>
   );

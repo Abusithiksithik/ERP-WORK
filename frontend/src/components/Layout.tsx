@@ -13,7 +13,7 @@ const Layout: React.FC = () => {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
-  const settingsSubPaths = ['/courses', '/batches', '/payment-methods', '/admission-sources', '/reports', '/users'];
+  const settingsSubPaths = ['/courses', '/batches', '/payment-methods', '/admission-sources', '/senior-staff', '/reports', '/users'];
   const isOnSettingsRoute = settingsSubPaths.some(p => location.pathname.startsWith(p));
   const [settingsOpen, setSettingsOpen] = useState(isOnSettingsRoute);
 
@@ -42,6 +42,7 @@ const Layout: React.FC = () => {
     { to: '/batches',         icon: <FiLayers />,   label: 'Batches'         },
     { to: '/payment-methods',   icon: <FiDollarSign />, label: 'Payment Methods' },
     { to: '/admission-sources', icon: <FiTarget />,     label: 'Source' },
+    { to: '/senior-staff',      icon: <FiUsers />,      label: 'Senior Staff' },
     { to: '/users',             icon: <FiSettings />,   label: 'Users'             },
   ];
 

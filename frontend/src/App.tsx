@@ -27,6 +27,7 @@ import ExamFeeList from './pages/examFees/ExamFeeList';
 import NewAdmissionList from './pages/newAdmission/NewAdmissionList';
 import NewAdmissionAdd from './pages/newAdmission/NewAdmissionAdd';
 import AdmissionSourceList from './pages/settings/AdmissionSourceList';
+import SeniorStaffSettings from './pages/settings/SeniorStaffSettings';
 import ReportsPage from './pages/reports/ReportsPage';
 
 const ADMIN_ROLES   = ['super_admin', 'admin'];
@@ -89,6 +90,7 @@ function App() {
           <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
             <Route path="/payment-methods" element={<PaymentMethodList />} />
             <Route path="/admission-sources" element={<AdmissionSourceList />} />
+            <Route path="/senior-staff" element={<SeniorStaffSettings />} />
             <Route path="/reports" element={<ReportsPage />} />
           </Route>
 
