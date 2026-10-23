@@ -18,6 +18,7 @@ interface HostelStudent {
   hostel_fee: number;
   mess_fee: number;
   total_fee: number;
+  cumulative_total_fee: number;
   discount: number;
   paid_amount: number;
   period_paid_amount: number;
@@ -241,6 +242,7 @@ const normalise = (row: Record<string, unknown>): HostelStudent => ({
   hostel_fee: toNum(row.hostel_fee),
   mess_fee: toNum(row.mess_fee),
   total_fee: toNum(row.total_fee),
+  cumulative_total_fee: toNum(row.cumulative_total_fee ?? row.total_fee),
   discount: toNum(row.discount),
   paid_amount: toNum(row.paid_amount),
   period_paid_amount: toNum(row.period_paid_amount),
@@ -319,7 +321,8 @@ const HostelList: React.FC = () => {
   useEffect(() => { load(); }, [load]);
 
   const totalStudents = students.length;
-  const totalFee = useMemo(() => students.reduce((s, r) => s + Math.max(0, r.total_fee - r.discount), 0), [students]);
+  const totalFee = useMemo(() => students.reduce((s, r) => s + r.cumulative_total_fee, 0), [students]);
+  const tillMonthLabel = useMemo(() => { const [year, month] = periodMonth.split('-').map(Number); return `${new Date(year, month - 1, 1).toLocaleString('en-IN', { month: 'long' })} ${year}`; }, [periodMonth]);
   const totalPaid = useMemo(() => students.reduce((s, r) => s + r.paid_amount, 0), [students]);
   const totalPending = useMemo(() => students.reduce((s, r) => s + r.pending_balance, 0), [students]);
 
@@ -724,14 +727,14 @@ const HostelList: React.FC = () => {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 16, marginBottom: 24 }}>
         {[
           { label: 'Hostel Students', value: String(totalStudents), icon: '🏠', color: 'var(--accent)' },
-          { label: 'Total Fee', value: fmt(totalFee), icon: '💰', color: '#f59e0b' },
-          { label: 'Total Paid (Till Month)', value: fmt(totalPaid), icon: '✅', color: '#10b981' },
-          { label: 'Total Pending', value: fmt(totalPending), icon: '⏳', color: '#ef4444' },
+          { label: 'Total Fee', value: fmt(totalFee), subLabel: `Till ${tillMonthLabel}`, icon: '💰', color: '#f59e0b' },
+          { label: 'Total Paid', value: fmt(totalPaid), subLabel: `Till ${tillMonthLabel}`, icon: '✅', color: '#10b981' },
+          { label: 'Total Pending', value: fmt(totalPending), subLabel: `Till ${tillMonthLabel}`, icon: '⏳', color: '#ef4444' },
         ].map(stat => (
           <div key={stat.label} className="card" style={{ padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{ fontSize: 28 }}>{stat.icon}</div><div>
               <div style={{ fontSize: stat.label === 'Hostel Students' ? 22 : 16, fontWeight: 800, color: stat.color }}>{stat.value}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>{stat.label}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>{stat.label}</div>{'subLabel' in stat && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>{stat.subLabel}</div>}
             </div>
           </div>
         ))}
