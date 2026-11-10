@@ -23,6 +23,7 @@ interface HostelStudent {
   paid_amount: number;
   period_paid_amount: number;
   period_last_payment_date: string | null;
+  period_last_payment_amount: number;
   pending_balance: number;
   notes: string | null;
   joining_date: string | null;
@@ -247,6 +248,7 @@ const normalise = (row: Record<string, unknown>): HostelStudent => ({
   paid_amount: toNum(row.paid_amount),
   period_paid_amount: toNum(row.period_paid_amount),
   period_last_payment_date: row.period_last_payment_date ? String(row.period_last_payment_date).slice(0, 10) : null,
+  period_last_payment_amount: toNum(row.period_last_payment_amount),
   pending_balance: toNum(row.pending_balance),
   notes: row.notes ? String(row.notes) : null,
   joining_date: row.joining_date ? String(row.joining_date).slice(0, 10) : null,
@@ -666,13 +668,14 @@ const HostelList: React.FC = () => {
   };
 
   const openReceipt = (student: HostelStudent) => {
-    const periodTotal = Math.max(0, student.total_fee - student.discount);
-    if (!student.period_id || periodTotal <= 0 || student.period_paid_amount < periodTotal) {
-      toast.info('Receipt is available only after this month’s hostel and mess fees are fully paid.');
+    // A receipt represents one actual payment transaction, not the full monthly fee
+    // or the cumulative amount paid. Partial payments are therefore receiptable.
+    if (!student.period_id || student.period_last_payment_amount <= 0) {
+      toast.info('No payment transaction is available for this month yet.');
       return;
     }
     setReceiptTarget(student);
-    setReceiptAmount(String(periodTotal));
+    setReceiptAmount(String(student.period_last_payment_amount));
     setReceiptPaymentDate(student.period_last_payment_date || localISO(new Date()));
     setReceiptStaff(seniorStaff[0] || '');
   };
@@ -792,7 +795,7 @@ const HostelList: React.FC = () => {
                     <button className="action-btn" title="Record Payment" style={{ color: '#10b981', background: 'rgba(16,185,129,0.1)', border: 'none', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => openPay(s)}><FiDollarSign /></button>
                     <button className="action-btn" title="Discount" style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.1)', border: 'none', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => openDiscount(s)}>🏷️</button>
                     <button className="action-btn" title="Payment History" style={{ color: '#f59e0b', background: 'rgba(245,158,11,0.1)', border: 'none', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => openHistory(s)}><FiClock /></button>
-                    {s.period_id && s.total_fee - s.discount > 0 && s.period_paid_amount >= Math.max(0, s.total_fee - s.discount) && <button className="action-btn" title="Generate monthly receipt" style={{ color: '#10b981', background: 'rgba(16,185,129,0.12)', border: 'none', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => openReceipt(s)}><FiPrinter /></button>}
+                    {s.period_id && <button className="action-btn" title="Generate receipt for latest payment" style={{ color: '#10b981', background: 'rgba(16,185,129,0.12)', border: 'none', borderRadius: 8, width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }} onClick={() => openReceipt(s)}><FiPrinter /></button>}
                   </div></td>
                 </tr>;
               })}</tbody>

@@ -129,6 +129,13 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
           WHERE hp_date.hostel_record_id=hr.id
             AND hp_date.period_id=fp.id
             AND hp_date.payment_date <= $2::date) AS period_last_payment_date,
+        (SELECT hp_latest.amount::numeric
+          FROM hostel_payments hp_latest
+          WHERE hp_latest.hostel_record_id=hr.id
+            AND hp_latest.period_id=fp.id
+            AND hp_latest.payment_date <= $2::date
+          ORDER BY hp_latest.payment_date DESC, hp_latest.created_at DESC, hp_latest.id DESC
+          LIMIT 1) AS period_last_payment_amount,
         -- Cumulative paid through the selected month, matching the cumulative pending balance.
         COALESCE((SELECT SUM(hp.amount)
           FROM hostel_payments hp
