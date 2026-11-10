@@ -1,6 +1,7 @@
 import multer, { FileFilterCallback } from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { Writable } from 'stream';
 import { Request } from 'express';
 
 const ensureDir = (dir: string) => {
@@ -61,13 +62,13 @@ const certFilter = (_req: Request, file: Express.Multer.File, cb: FileFilterCall
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
 
-export const uploadPhoto = multer({ storage: createStorage('photos'), fileFilter: imageFilter, limits: { fileSize: 5 * MB } });
-export const uploadThumbnail = multer({ storage: createStorage('thumbnails'), fileFilter: imageFilter, limits: { fileSize: 5 * MB } });
+export const uploadPhoto = multer({ storage: multer.memoryStorage(), fileFilter: imageFilter, limits: { fileSize: 5 * MB } });
+export const uploadThumbnail = multer({ storage: multer.memoryStorage(), fileFilter: imageFilter, limits: { fileSize: 5 * MB } });
 export const uploadQR = multer({ storage: createStorage('qr'), fileFilter: imageFilter, limits: { fileSize: 5 * MB } });
 export const uploadVideo = multer({ storage: createStorage('videos'), fileFilter: videoFilter, limits: { fileSize: 5 * GB } });
 export const uploadMaterial = multer({ storage: createStorage('materials'), fileFilter: materialFilter, limits: { fileSize: 50 * MB } });
 // Certificate upload — no file size limit
-export const uploadCertificate = multer({ storage: createStorage('certificates'), fileFilter: certFilter });
+export const uploadCertificate = multer({ storage: multer.memoryStorage(), fileFilter: certFilter });
 
 // Consent upload: accepts images (jpg/png/webp), PDF documents, and videos (mp4/mov/webm)
 const consentFilter = (_req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
@@ -85,18 +86,37 @@ export const uploadConsentPdf   = multer({ storage: createStorage('consent'), fi
 export const uploadConsentVideo = multer({ storage: createStorage('consent'), fileFilter: videoFilter, limits: { fileSize: 500 * MB } });
 export const uploadConsent      = multer({ storage: createStorage('consent'), fileFilter: consentFilter, limits: { fileSize: 500 * MB } });
 
+// Store large video streams directly on the persistent server volume while
+// keeping the small thumbnail in memory so its bytes can be saved in PostgreSQL.
+const videoAndThumbnailStorage: multer.StorageEngine = {
+  _handleFile(_req, file, cb) {
+    if (file.fieldname === 'thumbnail') {
+      const chunks: Buffer[] = [];
+      file.stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+      file.stream.on('error', cb);
+      file.stream.on('end', () => {
+        const buffer = Buffer.concat(chunks);
+        cb(null, { buffer, size: buffer.length } as any);
+      });
+      return;
+    }
+    const root = process.env.STORAGE_ROOT || path.resolve(process.cwd(), '..', '..', 'epff-storage');
+    const dir = path.join(root, 'videos');
+    ensureDir(dir);
+    const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(file.originalname)}`;
+    const target = path.join(dir, unique);
+    const out = fs.createWriteStream(target, { flags: 'wx' });
+    file.stream.pipe(out);
+    out.on('error', cb);
+    out.on('finish', () => cb(null, { destination: dir, filename: unique, path: target, size: out.bytesWritten }));
+  },
+  _removeFile(_req, file: Express.Multer.File, cb) {
+    if (file.path) fs.unlink(file.path, cb);
+    else cb(null);
+  },
+};
+
 export const uploadVideoWithThumb = multer({
-  storage: multer.diskStorage({
-    destination: (_req, file, cb) => {
-      const folder = file.fieldname === 'video' ? 'videos' : 'thumbnails';
-      const dir = path.join(__dirname, '../../uploads', folder);
-      ensureDir(dir);
-      cb(null, dir);
-    },
-    filename: (_req, file, cb) => {
-      const unique = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
-      cb(null, `${unique}${path.extname(file.originalname)}`);
-    },
-  }),
+  storage: videoAndThumbnailStorage,
   limits: { fileSize: 5 * GB },
 });

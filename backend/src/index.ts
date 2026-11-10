@@ -35,6 +35,8 @@ import examFeesRoutes        from './routes/examFees.routes';
 import newAdmissionsRoutes   from './routes/newAdmissions.routes';
 import admissionSourcesRoutes from './routes/admissionSources.routes';
 import reportsRoutes          from './routes/reports.routes';
+import filesRoutes            from './routes/files.routes';
+import { STORAGE_ROOT } from './utils/storage';
 
 const app  = express();
 const PORT = process.env.PORT || 5007;
@@ -65,7 +67,8 @@ app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb', parameterLimit: 1000 }));
 
 // Static uploads
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(STORAGE_ROOT)); // persistent storage outside the project checkout
+app.use('/uploads', express.static(path.join(__dirname, '../uploads'))); // legacy files remain readable during migration
 
 // Routes
 const loginLimiter = rateLimit({
@@ -77,6 +80,7 @@ const loginLimiter = rateLimit({
 });
 
 app.use('/api/auth/login', loginLimiter);
+app.use('/api/files',             filesRoutes);
 app.use('/api/auth',              authRoutes);
 app.use('/api/users',             usersRoutes);
 app.use('/api/students',          studentsRoutes);

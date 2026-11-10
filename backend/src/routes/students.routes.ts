@@ -4,6 +4,7 @@ import { generateStudentId } from '../utils/studentId';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 import { uploadPhoto, uploadCertificate, uploadConsentImage, uploadConsentPdf, uploadConsentVideo } from '../middleware/upload';
 import { stringify } from 'csv-stringify/sync';
+import { storeAsset } from '../utils/fileAssets';
 
 const router = Router();
 router.use(authenticate);
@@ -491,7 +492,8 @@ router.post('/', authorize('super_admin', 'admin'), uploadPhoto.single('photo'),
     }
 
     const student_id = await generateStudentId(client);
-    const photo_url  = req.file ? `/uploads/photos/${req.file.filename}` : null;
+    const photoAsset = req.file ? await storeAsset(req.file, 'student_photo') : null;
+    const photo_url  = photoAsset?.url || null;
 
     const cert10  = cert_10th_collected  === 'true' || cert_10th_collected  === true;
     const cert12  = cert_12th_collected  === 'true' || cert_12th_collected  === true;
@@ -706,9 +708,8 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadPhoto.single('photo'
       }
     }
 
-    const photo_url = req.file
-      ? `/uploads/photos/${req.file.filename}`
-      : existing.rows[0].photo_url;
+    const photoAsset = req.file ? await storeAsset(req.file, 'student_photo') : null;
+    const photo_url = photoAsset?.url || existing.rows[0].photo_url;
 
     const cert10  = cert_10th_collected  === 'true' || cert_10th_collected  === true;
     const cert12  = cert_12th_collected  === 'true' || cert_12th_collected  === true;
@@ -878,7 +879,8 @@ router.post('/:id/cert', authorize('super_admin', 'admin'), uploadCertificate.si
     if (!allowed.includes(cert_type)) { res.status(400).json({ success: false, message: 'Invalid cert_type' }); return; }
     const colMap: Record<string, string> = { '10th': 'cert_10th_url', '12th': 'cert_12th_url', 'diploma': 'cert_diploma_url' };
     const col = colMap[cert_type];
-    const url = `/uploads/certificates/${req.file.filename}`;
+    const asset = await storeAsset(req.file, `student_certificate_${cert_type}`);
+    const url = asset.url;
     const result = await query(
       `UPDATE students SET ${col}=$1 WHERE id=$2 RETURNING id, cert_10th_url, cert_12th_url, cert_diploma_url`,
       [url, req.params.id]

@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { query } from '../config/db';
 import { authenticate, AuthRequest } from '../middleware/auth';
 import { uploadPhoto } from '../middleware/upload';
+import { storeAsset } from '../utils/fileAssets';
 
 const router = Router();
 router.use(authenticate);
@@ -62,7 +63,8 @@ router.post('/photo', uploadPhoto.single('photo'), async (req: AuthRequest, res:
       res.status(400).json({ success: false, message: 'No photo uploaded' });
       return;
     }
-    const photo_url = `/uploads/photos/${req.file.filename}`;
+    const asset = await storeAsset(req.file, 'user_profile_photo');
+    const photo_url = asset.url;
     await query('UPDATE users SET photo_url=$1 WHERE id=$2', [photo_url, req.user!.id]);
     res.json({ success: true, photo_url });
   } catch (err) {

@@ -2,6 +2,8 @@ import { Router, Response } from 'express';
 import { query } from '../config/db';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 import { uploadVideoWithThumb } from '../middleware/upload';
+import { storeAsset } from '../utils/fileAssets';
+
 
 const router = Router();
 router.use(authenticate);
@@ -54,8 +56,10 @@ router.post('/', authorize('super_admin', 'admin'), uploadVideoWithThumb.fields(
     if (!course_id || !title) { res.status(400).json({ success: false, message: 'course_id and title required' }); return; }
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
     if (!files?.video?.[0]) { res.status(400).json({ success: false, message: 'Video file required' }); return; }
-    const video_url = `/uploads/videos/${files.video[0].filename}`;
-    const thumbnail_url = files?.thumbnail?.[0] ? `/uploads/thumbnails/${files.thumbnail[0].filename}` : null;
+    const videoFile = files.video[0];
+    const video_url = `/uploads/videos/${videoFile.filename}`;
+    const thumbAsset = files?.thumbnail?.[0] ? await storeAsset(files.thumbnail[0], 'lms_video_thumbnail') : null;
+    const thumbnail_url = thumbAsset?.url || null;
     const result = await query(
       `INSERT INTO lms_videos (course_id, module_id, title, description, thumbnail_url, video_url, is_free, order_number, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
@@ -101,8 +105,13 @@ router.put('/:id', authorize('super_admin', 'admin'), uploadVideoWithThumb.field
     if (existing.rows.length === 0) { res.status(404).json({ success: false, message: 'Not found' }); return; }
     const { title, description, is_free, order_number, module_id } = req.body;
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const video_url = files?.video?.[0] ? `/uploads/videos/${files.video[0].filename}` : existing.rows[0].video_url;
-    const thumbnail_url = files?.thumbnail?.[0] ? `/uploads/thumbnails/${files.thumbnail[0].filename}` : existing.rows[0].thumbnail_url;
+    let video_url = existing.rows[0].video_url;
+    if (files?.video?.[0]) {
+      const videoFile = files.video[0];
+      video_url = `/uploads/videos/${videoFile.filename}`;
+    }
+    const thumbAsset = files?.thumbnail?.[0] ? await storeAsset(files.thumbnail[0], 'lms_video_thumbnail') : null;
+    const thumbnail_url = thumbAsset?.url || existing.rows[0].thumbnail_url;
     const result = await query(
       `UPDATE lms_videos SET title=$1, description=$2, thumbnail_url=$3, video_url=$4, is_free=$5, order_number=$6, module_id=$7
        WHERE id=$8 RETURNING *`,
