@@ -146,20 +146,6 @@ const PaymentReceipt: React.FC = () => {
   const printReceipt = (r: AnyRow, existingWindow?: Window | null) => {
     const w = existingWindow || window.open('', '_blank', 'width=420,height=760');
     if (!w) { toast.info('Allow pop-ups to print the receipt.'); return; }
-    const qrPayload = JSON.stringify({
-      billNo: r.receiptNo,
-      billDate: String(r.paymentDate || '').slice(0, 10),
-      registrationNo: r.student.student_id || '',
-      studentName: r.student.full_name || '',
-      feeCategory: r.category === 'tuition' ? 'Tuition / Book Fee' : r.category === 'hostel' ? 'Hostel Fee' : 'Exam Fee',
-      amountPaidThisBill: Number(r.amount || 0),
-      totalPaidAfterThisBill: Number(r.totalPaid ?? r.amount ?? 0),
-      pendingAfterThisBill: Number(r.pending ?? 0),
-      paymentMethod: r.method || '',
-      transactionReference: r.reference || '',
-      notes: r.notes || ''
-    });
-    const payload = html(qrPayload);
     w.document.open();
     w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${html(r.receiptNo)}</title>
       <style>
@@ -176,14 +162,10 @@ const PaymentReceipt: React.FC = () => {
         .value{flex:1;overflow-wrap:anywhere;font-weight:600}
         .bill{font-size:12px}
         .amount{font-size:15px;font-weight:700}
-        .qr-wrap{display:flex;justify-content:center;margin:3mm 0 2mm}
-        #qr{width:30mm;height:30mm}
-        #qr img,#qr canvas{width:30mm!important;height:30mm!important;image-rendering:pixelated}
-        .qr-caption{text-align:center;font-size:9px}
         .footer{text-align:center;margin-top:3mm;font-size:9px}
         @media screen{body{margin:10px auto}.receipt{border:1px solid #ddd;padding:4mm}}
       </style></head><body><main class="receipt">
-      <h1>NALAM HEALTH CARE</h1><div class="subtitle">PAYMENT RECEIPT</div><div class="rule"></div>
+      <div class="subtitle">PAYMENT RECEIPT</div><div class="rule"></div>
       <div class="line bill"><span class="label">Bill No.</span><b class="value">${html(r.receiptNo)}</b></div>
       <div class="line"><span class="label">Bill Date</span><b class="value">${html(String(r.paymentDate || '').slice(0,10))}</b></div>
       <div class="line"><span class="label">Reg. No.</span><b class="value">${html(r.student.student_id || '-')}</b></div>
@@ -195,17 +177,9 @@ const PaymentReceipt: React.FC = () => {
       <div class="line"><span class="label">Bill Amt.</span><b class="value amount">${money(r.amount)}</b></div>
       <div class="line"><span class="label">Total Paid</span><b class="value">${money(r.totalPaid ?? r.amount)}</b></div>
       <div class="line"><span class="label">Balance Due</span><b class="value">${money(r.pending ?? 0)}</b></div>
-      <div class="qr-wrap"><div id="qr"></div></div><div class="qr-caption">Scan QR to view payment details</div>
       <div class="footer">Computer generated receipt<br>Thank you</div>
-      </main><script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-      <script>
-        const qrText = ${JSON.stringify(qrPayload)};
-        function printWhenReady(){
-          if(window.QRCode){new QRCode(document.getElementById('qr'),{text:qrText,width:180,height:180,colorDark:'#000000',colorLight:'#ffffff',correctLevel:QRCode.CorrectLevel.M});setTimeout(()=>window.print(),500);}
-          else {document.getElementById('qr').textContent='QR unavailable';alert('QR code library could not load. Connect this computer to the internet and print again.');}
-        }
-        window.onload=printWhenReady;
-      </script></body></html>`);
+      </main>
+      <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script></body></html>`);
     w.document.close();
   };
 
@@ -216,7 +190,7 @@ const PaymentReceipt: React.FC = () => {
     {!student ? <>
       <div className="page-header">
         <div><h1 className="page-title">Payment Receipt</h1><p style={{ color: 'var(--text-muted)', marginTop: 4 }}>Select a student to view complete fee details and collect payments.</p></div>
-        {/* <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="btn btn-secondary" onClick={() => navigate('/new-admissions')}>Adjustment</button><button className="btn btn-primary" onClick={() => navigate('/new-admissions')}>Add Student</button></div> */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="btn btn-primary" onClick={() => navigate('/new-admissions')}>Add Student</button></div>
       </div>
       <div className="card" style={{ padding: 18 }}>
         <h3 style={{ marginTop: 0 }}>Students</h3>
@@ -240,7 +214,7 @@ const PaymentReceipt: React.FC = () => {
           <button className="btn btn-secondary" onClick={() => { setStudent(null); setLastReceipt(null); setPeriodId(''); }}><FiArrowLeft /> Back to Students</button>
           <div><h1 className="page-title">Student Fee Details</h1><p style={{ color: 'var(--text-muted)', marginTop: 4 }}>Complete fee records, payment collection and payment history.</p></div>
         </div>
-        {/* <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="btn btn-secondary" onClick={() => navigate('/new-admissions')}>Adjustment</button><button className="btn btn-primary" onClick={() => navigate('/new-admissions')}>Add Student</button><button className="btn btn-secondary" onClick={refresh} disabled={detailLoading}><FiRefreshCw /> Refresh</button></div> */}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="btn btn-primary" onClick={() => navigate('/new-admissions')}>Add Student</button></div>
       </div>
       {detailLoading ? <div className="card" style={{ padding: 40 }}>Loading fee details...</div> : <>
         <div className="card" style={{ padding: 18, marginBottom: 16 }}><h2 style={{ margin: 0 }}>{student.full_name}</h2><p style={{ color: 'var(--text-muted)', margin: '5px 0 0' }}>{student.student_id} · {student.course_name || '-'} · {student.mobile || '-'}</p></div>
