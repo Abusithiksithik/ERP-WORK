@@ -417,6 +417,7 @@ router.get('/:id/payments', authorize('super_admin', 'admin', 'incharge'), async
 
 // POST /api/hostel/:id/payments — record payment against the selected fee period.
 router.post('/:id/payments', authorize('super_admin', 'admin'), async (req: AuthRequest, res: Response) => {
+  let paymentId: number | null = null;
   try {
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) {
@@ -524,12 +525,13 @@ router.post('/:id/payments', authorize('super_admin', 'admin'), async (req: Auth
         return;
       }
 
-      await client.query(
+      const insertedPayment = await client.query(
         `INSERT INTO hostel_payments
           (hostel_record_id, student_id, period_id, amount, payment_date, payment_method, reference, notes, recorded_by)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
         [id, hr.student_id, selectedPeriodId, amt, payment_date || new Date().toISOString().split('T')[0], payment_method || 'cash', reference || null, notes || null, req.user!.id]
       );
+      paymentId = Number(insertedPayment.rows[0].id);
       await client.query(
         `UPDATE hostel_records SET paid_amount = (
            SELECT COALESCE(SUM(amount),0) FROM hostel_payments WHERE hostel_record_id=$1
@@ -569,9 +571,42 @@ router.post('/:id/payments', authorize('super_admin', 'admin'), async (req: Auth
    WHERE fp.id = $1`,
   [selectedPeriodId]
 );
-    res.status(201).json({ success: true, message: 'Payment recorded successfully', data: updated.rows[0] || null });
+    res.status(201).json({ success: true, message: 'Payment recorded successfully', data: { ...(updated.rows[0] || {}), payment_id: paymentId } });
   } catch (err) {
     console.error('POST /hostel/:id/payments error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/hostel/student/:studentId — resolve the existing hostel record for Payment Receipt.
+router.get('/student/:studentId', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
+  try {
+    const studentId = Number(req.params.studentId);
+    if (!Number.isInteger(studentId) || studentId <= 0) {
+      res.status(400).json({ success: false, message: 'Invalid student ID' });
+      return;
+    }
+    await query(
+      `INSERT INTO hostel_records (student_id, hostel_fee, mess_fee, paid_amount)
+       SELECT s.id, 0, 0, 0 FROM students s
+       WHERE s.id=$1 AND LOWER(COALESCE(s.accommodation_type,''))='hostel'
+         AND LOWER(COALESCE(s.status,'')) <> 'discontinued'
+       ON CONFLICT (student_id) DO NOTHING`,
+      [studentId]
+    );
+    const result = await query(
+      `SELECT hr.id AS hostel_record_id, hr.student_id, s.student_id AS student_code, s.full_name
+       FROM hostel_records hr JOIN students s ON s.id = hr.student_id
+       WHERE hr.student_id=$1 AND LOWER(COALESCE(s.accommodation_type,''))='hostel'`,
+      [studentId]
+    );
+    if (!result.rows.length) {
+      res.json({ success: true, data: null });
+      return;
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (err) {
+    console.error('GET /hostel/student/:studentId error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

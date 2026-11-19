@@ -14,6 +14,7 @@ import VideoEdit from './pages/lms/VideoEdit';
 import MaterialList from './pages/materials/MaterialList';
 import MaterialAdd from './pages/materials/MaterialAdd';
 import PaymentMethodList from './pages/payments/PaymentMethodList';
+import PaymentReceipt from './pages/payments/PaymentReceipt';
 import EnrollmentList from './pages/enrollment/EnrollmentList';
 import AttendancePage from './pages/attendance/AttendancePage';
 import ProfilePage from './pages/profile/ProfilePage';
@@ -84,6 +85,11 @@ function App() {
           <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
             <Route path="/materials" element={<MaterialList />} />
             <Route path="/materials/add" element={<MaterialAdd />} />
+          </Route>
+
+          {/* Payment Receipt — Admin only */}
+          <Route element={<PrivateRoute allowedRoles={ADMIN_ROLES} />}>
+            <Route path="/payment-receipt" element={<PaymentReceipt />} />
           </Route>
 
           {/* Payment Methods — Admin only (Settings section) */}

@@ -79,6 +79,10 @@ const Layout: React.FC = () => {
       show: isAdmin || isIncharge,
     },
     {
+      to: '/payment-receipt', icon: <FiCreditCard />, label: 'Payment Receipt',
+      show: isAdmin,
+    },
+    {
       to: '/discontinued-students', icon: <FiUserX />, label: 'Discontinued',
       show: isAdmin,
     },

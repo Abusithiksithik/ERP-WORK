@@ -200,7 +200,7 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         GREATEST(COALESCE(efr.exam_fee, 0) - COALESCE(efr.discount, 0), 0)::numeric AS net_payable,
         COALESCE(efr.paid_amount, 0)::numeric                               AS paid_amount,
         GREATEST(
-          COALESCE(efr.exam_fee, 0) - COALESCE(efr.paid_amount, 0), 0
+          COALESCE(efr.exam_fee, 0) - COALESCE(efr.discount, 0) - COALESCE(efr.paid_amount, 0), 0
         )::numeric                                                           AS pending_balance,
         efr.notes,
         efr.created_at,
@@ -340,65 +340,66 @@ router.get('/:id/payments', authorize('super_admin', 'admin', 'incharge'), async
 // ─── POST /api/exam-fees/:id/payments — add a payment ───
 router.post('/:id/payments', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
+  let inTransaction = false;
   try {
     const { amount, payment_date, payment_method, reference, notes } = req.body;
-    if (!amount || Number(amount) <= 0) {
+    const amt = Number(amount);
+    if (!Number.isFinite(amt) || amt <= 0) {
       res.status(400).json({ success: false, message: 'A positive amount is required' });
       return;
     }
+
+    await client.query('BEGIN'); inTransaction = true;
     const recordRes = await client.query(
-      'SELECT * FROM exam_fee_records WHERE id = $1',
+      'SELECT * FROM exam_fee_records WHERE id = $1 FOR UPDATE',
       [req.params.id]
     );
     if (recordRes.rows.length === 0) {
+      await client.query('ROLLBACK'); inTransaction = false;
       res.status(404).json({ success: false, message: 'Exam fee record not found' });
       return;
     }
     const record = recordRes.rows[0];
+    const paidRes = await client.query(
+      'SELECT COALESCE(SUM(amount),0)::numeric AS paid FROM exam_fee_payments WHERE exam_fee_record_id=$1',
+      [req.params.id]
+    );
+    const due = Math.max(0, Number(record.exam_fee || 0) - Number(record.discount || 0) - Number(paidRes.rows[0].paid || 0));
+    if (amt > due + 0.000001) {
+      await client.query('ROLLBACK'); inTransaction = false;
+      res.status(400).json({ success: false, message: `Payment exceeds the outstanding balance of ₹${due.toLocaleString('en-IN')}` });
+      return;
+    }
 
-    await client.query('BEGIN');
-    await client.query(
+    const insertedPayment = await client.query(
       `INSERT INTO exam_fee_payments
          (exam_fee_record_id, student_id, amount, payment_date, payment_method, reference, notes, recorded_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-      [
-        req.params.id,
-        record.student_id,
-        Number(amount),
-        payment_date || new Date().toISOString().split('T')[0],
-        payment_method || 'cash',
-        reference || null,
-        notes || null,
-        req.user!.id,
-      ]
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+      [req.params.id, record.student_id, amt,
+       payment_date || new Date().toISOString().split('T')[0], payment_method || 'cash',
+       reference || null, notes || null, req.user!.id]
     );
-    // Sync paid amount for THIS student's record only
     await client.query(
       `UPDATE exam_fee_records
-       SET paid_amount = (
-         SELECT COALESCE(SUM(amount), 0) FROM exam_fee_payments WHERE exam_fee_record_id = $1
-       )
-       WHERE id = $1`,
-      [req.params.id]
+       SET paid_amount = (SELECT COALESCE(SUM(amount),0) FROM exam_fee_payments WHERE exam_fee_record_id=$1)
+       WHERE id=$1`, [req.params.id]
     );
-    await client.query('COMMIT');
+    await client.query('COMMIT'); inTransaction = false;
 
     const updated = await query(
-      `SELECT efr.*,
-         s.full_name, s.student_id AS student_code,
+      `SELECT efr.*, s.full_name, s.student_id AS student_code,
          c.course_name, b.batch_name,
          COALESCE(efr.exam_fee,0) AS total_fee,
-         GREATEST(COALESCE(efr.exam_fee,0)-COALESCE(efr.paid_amount,0),0) AS pending_balance
+         GREATEST(COALESCE(efr.exam_fee,0)-COALESCE(efr.discount,0)-COALESCE(efr.paid_amount,0),0) AS pending_balance
        FROM exam_fee_records efr
-       JOIN students s ON s.id = efr.student_id
-       LEFT JOIN courses c ON c.id = s.course_id
-       LEFT JOIN batches b ON b.id = s.batch_id
-       WHERE efr.id = $1`,
-      [req.params.id]
+       JOIN students s ON s.id=efr.student_id
+       LEFT JOIN courses c ON c.id=s.course_id
+       LEFT JOIN batches b ON b.id=s.batch_id
+       WHERE efr.id=$1`, [req.params.id]
     );
-    res.status(201).json({ success: true, data: updated.rows[0] });
+    res.status(201).json({ success: true, data: { ...updated.rows[0], payment_id: Number(insertedPayment.rows[0].id) } });
   } catch (err) {
-    await client.query('ROLLBACK');
+    if (inTransaction) await client.query('ROLLBACK');
     console.error('POST /exam-fees/:id/payments error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   } finally {

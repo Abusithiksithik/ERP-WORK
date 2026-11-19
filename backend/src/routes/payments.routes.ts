@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { query } from '../config/db';
+import { pool, query } from '../config/db';
 import { authenticate, authorize, AuthRequest } from '../middleware/auth';
 
 const router = Router();
@@ -14,6 +14,7 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
         p.*,
         s.full_name      AS student_name,
         s.student_id     AS student_code,
+        u.full_name      AS recorded_by_name,
         pm.method_type,
         c.course_name,
         cc.category_name,
@@ -33,6 +34,7 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
       FROM payments p
       LEFT JOIN students s         ON s.id  = p.student_id
       LEFT JOIN payment_methods pm ON pm.id = p.payment_method_id
+      LEFT JOIN users u            ON u.id = p.verified_by
       LEFT JOIN enrollments e      ON e.id  = p.enrollment_id
       LEFT JOIN courses c          ON c.id  = e.course_id
       LEFT JOIN course_categories cc ON cc.id = c.category_id
@@ -51,58 +53,84 @@ router.get('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthR
   }
 });
 
-// POST /api/payments — manual admin entry, auto-verified
+// POST /api/payments — manual admin entry, auto-verified.
+// Enrollment row locking prevents concurrent partial payments from exceeding the due balance.
 router.post('/', authorize('super_admin', 'admin', 'incharge'), async (req: AuthRequest, res: Response) => {
+  const client = await pool.connect();
+  let inTransaction = false;
   try {
     const {
       student_id, enrollment_id, payment_method_id,
       amount, payment_date, transaction_reference, notes, payment_type, fee_type,
     } = req.body;
-    if (!student_id || !amount || Number(amount) <= 0) {
+    const amt = Number(amount);
+    if (!student_id || !Number.isFinite(amt) || amt <= 0) {
       res.status(400).json({ success: false, message: 'student_id and a positive amount are required' });
       return;
     }
-    if (enrollment_id) {
-      const enrollmentCheck = await query(
-        'SELECT student_id, status FROM enrollments WHERE id=$1',
-        [enrollment_id]
-      );
-      if (enrollmentCheck.rows.length === 0) {
-        res.status(400).json({ success: false, message: 'Enrollment not found' });
-        return;
-      }
-      if (Number(enrollmentCheck.rows[0].student_id) !== Number(student_id)) {
-        res.status(400).json({ success: false, message: 'Payment student does not match enrollment student' });
-        return;
-      }
-      if (enrollmentCheck.rows[0].status !== 'approved') {
-        res.status(400).json({ success: false, message: 'Payments can only be recorded for approved enrollments' });
+
+    await client.query('BEGIN');
+    inTransaction = true;
+
+    if (payment_method_id) {
+      const method = await client.query('SELECT id FROM payment_methods WHERE id=$1 AND is_enabled=TRUE', [payment_method_id]);
+      if (!method.rows.length) {
+        await client.query('ROLLBACK'); inTransaction = false;
+        res.status(400).json({ success: false, message: 'Selected payment method is not enabled' });
         return;
       }
     }
 
-    // Auto-verify since this is a manual admin entry
-    const result = await query(
+    if (enrollment_id) {
+      const enrollmentCheck = await client.query(
+        'SELECT id, student_id, status, total_fee, discount FROM enrollments WHERE id=$1 FOR UPDATE',
+        [enrollment_id]
+      );
+      if (!enrollmentCheck.rows.length) {
+        await client.query('ROLLBACK'); inTransaction = false;
+        res.status(400).json({ success: false, message: 'Enrollment not found' });
+        return;
+      }
+      const enrollment = enrollmentCheck.rows[0];
+      if (Number(enrollment.student_id) !== Number(student_id)) {
+        await client.query('ROLLBACK'); inTransaction = false;
+        res.status(400).json({ success: false, message: 'Payment student does not match enrollment student' });
+        return;
+      }
+      if (enrollment.status !== 'approved') {
+        await client.query('ROLLBACK'); inTransaction = false;
+        res.status(400).json({ success: false, message: 'Payments can only be recorded for approved enrollments' });
+        return;
+      }
+      const paid = await client.query(
+        `SELECT COALESCE(SUM(amount),0)::numeric AS paid FROM payments
+         WHERE enrollment_id=$1 AND status='verified'`, [enrollment_id]
+      );
+      const due = Math.max(0, Number(enrollment.total_fee || 0) - Number(enrollment.discount || 0) - Number(paid.rows[0].paid || 0));
+      if (amt > due + 0.000001) {
+        await client.query('ROLLBACK'); inTransaction = false;
+        res.status(400).json({ success: false, message: `Payment exceeds the outstanding balance of ₹${due.toLocaleString('en-IN')}` });
+        return;
+      }
+    }
+
+    const result = await client.query(
       `INSERT INTO payments
          (student_id, enrollment_id, payment_method_id, amount, payment_date,
           transaction_reference, notes, payment_type, status, verified_by, verified_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'verified',$9,NOW()) RETURNING *`,
-      [
-        student_id,
-        enrollment_id   || null,
-        payment_method_id || null,
-        Number(amount),
-        payment_date || new Date().toISOString().split('T')[0],
-        transaction_reference || null,
-        notes || null,
-        payment_type || fee_type || 'course_fee',
-        req.user!.id,
-      ]
+      [student_id, enrollment_id || null, payment_method_id || null, amt,
+       payment_date || new Date().toISOString().split('T')[0], transaction_reference || null,
+       notes || null, payment_type || fee_type || 'course_fee', req.user!.id]
     );
+    await client.query('COMMIT'); inTransaction = false;
     res.status(201).json({ success: true, data: result.rows[0] });
   } catch (err) {
+    if (inTransaction) await client.query('ROLLBACK');
     console.error('POST /payments error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
+  } finally {
+    client.release();
   }
 });
 
